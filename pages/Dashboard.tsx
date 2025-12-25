@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../modules/auth/AuthContext';
-import { MOCK_ARTICLES, MOCK_ADS, MOCK_EPAPER, MOCK_SETTINGS, MOCK_CATEGORIES, MOCK_TAGS, MOCK_CLASSIFIEDS } from '../services/mockData';
+import { MOCK_ARTICLES, MOCK_ADS, MOCK_EPAPER, MOCK_SETTINGS, MOCK_CATEGORIES, MOCK_TAGS, MOCK_CLASSIFIEDS, MOCK_USERS, MOCK_MESSAGES, MOCK_MAILS } from '../services/mockData';
 import { supabase } from '../services/supabaseClient';
 import { UserRole, Article, Advertisement, EPaperPage, WatermarkSettings, Category, Tag, Classified } from '../types';
 import { 
@@ -31,7 +31,7 @@ export const Dashboard: React.FC = () => {
   const [articles, setArticles] = useState<Article[]>([]);
   const [ads, setAds] = useState<Advertisement[]>([]);
   const [pages, setPages] = useState<EPaperPage[]>([]);
-  const [categories, setCategories] = useState<Category[]>(MOCK_CATEGORIES); // Keep Categories Mock for now or move to DB
+  const [categories, setCategories] = useState<Category[]>(MOCK_CATEGORIES); 
   const [tags, setTags] = useState<Tag[]>(MOCK_TAGS);
   const [classifieds, setClassifieds] = useState<Classified[]>([]);
   const [watermarkSettings, setWatermarkSettings] = useState<WatermarkSettings>(MOCK_SETTINGS.watermark);
@@ -69,6 +69,13 @@ export const Dashboard: React.FC = () => {
         const { data: pData } = await supabase.from('epaper_pages').select('*').order('page_number');
         if(pData) setPages(pData.map(p => ({...p, pageNumber: p.page_number, imageUrl: p.image_url})));
 
+        // Fetch Taxonomy
+        const { data: catData } = await supabase.from('categories').select('*');
+        if(catData && catData.length > 0) setCategories(catData);
+
+        const { data: tagData } = await supabase.from('tags').select('*');
+        if(tagData && tagData.length > 0) setTags(tagData);
+
     } catch (e) {
         console.error("Fetch error", e);
     } finally {
@@ -82,38 +89,73 @@ export const Dashboard: React.FC = () => {
 
   // SEED DATA FUNCTION
   const handleSeedDatabase = async () => {
-    if(!confirm("This will insert all mock data into the database. Continue?")) return;
+    if(!confirm("This will insert ALL mock data (Users, Articles, Ads, Messages, etc) into the database. Continue?")) return;
     setLoading(true);
     
-    // Articles
-    const dbArticles = MOCK_ARTICLES.map(a => ({
-        title: a.title, summary: a.summary, content: a.content, 
-        author_name: a.authorName, author_avatar: a.authorAvatar,
-        status: a.status, category: a.category, thumbnail_url: a.thumbnailUrl,
-        is_featured: a.isFeatured, is_trending: a.isTrending
-    }));
-    await supabase.from('articles').insert(dbArticles);
+    try {
+        // 1. Profiles
+        await supabase.from('profiles').upsert(MOCK_USERS);
 
-    // Ads
-    const dbAds = MOCK_ADS.map(a => ({
-        client_name: a.clientName, image_url: a.imageUrl, link: a.link, placement: a.placement, status: a.status
-    }));
-    await supabase.from('ads').insert(dbAds);
+        // 2. Categories & Tags
+        await supabase.from('categories').upsert(MOCK_CATEGORIES);
+        await supabase.from('tags').upsert(MOCK_TAGS);
 
-    // Classifieds
-    const dbClassifieds = MOCK_CLASSIFIEDS.map(c => ({
-        title: c.title, content: c.content, location: c.location, price: c.price, contact: c.contact, category: c.category, status: c.status
-    }));
-    await supabase.from('classifieds').insert(dbClassifieds);
+        // 3. Articles
+        const dbArticles = MOCK_ARTICLES.map(a => ({
+            id: a.id,
+            title: a.title, summary: a.summary, content: a.content, 
+            author_id: a.authorId, author_name: a.authorName, author_avatar: a.authorAvatar,
+            status: a.status, category: a.category, thumbnail_url: a.thumbnailUrl,
+            is_featured: a.isFeatured, is_trending: a.isTrending
+        }));
+        await supabase.from('articles').upsert(dbArticles);
 
-    // Epaper
-    const dbPages = MOCK_EPAPER.map(p => ({
-        date: p.date, page_number: p.pageNumber, image_url: p.imageUrl, regions: p.regions
-    }));
-    await supabase.from('epaper_pages').insert(dbPages);
+        // 4. Ads
+        const dbAds = MOCK_ADS.map(a => ({
+            id: a.id,
+            client_name: a.clientName, image_url: a.imageUrl, link: a.link, placement: a.placement, status: a.status
+        }));
+        await supabase.from('ads').upsert(dbAds);
 
-    alert("Seeding complete! Refreshing...");
-    loadData();
+        // 5. Classifieds
+        const dbClassifieds = MOCK_CLASSIFIEDS.map(c => ({
+            id: c.id,
+            title: c.title, content: c.content, location: c.location, price: c.price, contact: c.contact, category: c.category, status: c.status
+        }));
+        await supabase.from('classifieds').upsert(dbClassifieds);
+
+        // 6. Epaper
+        const dbPages = MOCK_EPAPER.map(p => ({
+            id: p.id,
+            date: p.date, page_number: p.pageNumber, image_url: p.imageUrl, regions: p.regions
+        }));
+        await supabase.from('epaper_pages').upsert(dbPages);
+
+        // 7. Messages
+        const dbMessages = MOCK_MESSAGES.map(m => ({
+            id: m.id,
+            channel: m.channel, sender_id: m.senderId, sender_name: m.senderName, sender_role: m.senderRole, sender_avatar: m.senderAvatar,
+            content: m.content, created_at: m.createdAt, is_system: m.isSystem
+        }));
+        await supabase.from('messages').upsert(dbMessages);
+
+        // 8. Mails
+        const dbMails = MOCK_MAILS.map(m => ({
+            id: m.id,
+            sender_id: m.senderId, sender_name: m.senderName, sender_email: m.senderEmail,
+            recipient_id: m.recipientId, recipient_name: m.recipientName, recipient_email: m.recipientEmail,
+            subject: m.subject, content: m.content, created_at: m.createdAt, is_read: m.isRead
+        }));
+        await supabase.from('mails').upsert(dbMails);
+
+        alert("Seeding complete! Refreshing...");
+        loadData();
+    } catch (e) {
+        console.error("Seeding Error:", e);
+        alert("Error seeding data. Check console.");
+    } finally {
+        setLoading(false);
+    }
   };
 
   if (!user) return <div>Access Denied</div>;
@@ -144,6 +186,7 @@ export const Dashboard: React.FC = () => {
         title: newArticleData.title,
         summary: newArticleData.summary,
         content: newArticleData.content || newArticleData.summary,
+        author_id: user.id,
         author_name: user.name,
         author_avatar: user.avatar,
         status: 'PUBLISHED', 
@@ -206,12 +249,48 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleSaveSettings = (e: React.FormEvent) => { e.preventDefault(); alert("Saved"); };
-  const handleAddCategory = (e: React.FormEvent) => { e.preventDefault(); };
-  const handleDeleteCategory = (id: string) => {};
-  const handleAddTag = (e: React.FormEvent) => {};
-  const handleDeleteTag = (id: string) => {};
-  const handleAdStatusToggle = (id: string) => {};
-  const handleClassifiedStatusToggle = (id: string) => {};
+  
+  const handleAddCategory = async (e: React.FormEvent) => { 
+      e.preventDefault();
+      await supabase.from('categories').insert({ name: newCategoryName, type: newCategoryType });
+      setNewCategoryName('');
+      loadData();
+  };
+
+  const handleDeleteCategory = async (id: string) => {
+      await supabase.from('categories').delete().eq('id', id);
+      loadData();
+  };
+
+  const handleAddTag = async (e: React.FormEvent) => {
+      e.preventDefault();
+      await supabase.from('tags').insert({ name: newTagName });
+      setNewTagName('');
+      loadData();
+  };
+
+  const handleDeleteTag = async (id: string) => {
+      await supabase.from('tags').delete().eq('id', id);
+      loadData();
+  };
+
+  const handleAdStatusToggle = async (id: string) => {
+      const ad = ads.find(a => a.id === id);
+      if(ad) {
+          const newStatus = ad.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+          await supabase.from('ads').update({ status: newStatus }).eq('id', id);
+          loadData();
+      }
+  };
+
+  const handleClassifiedStatusToggle = async (id: string) => {
+      const ad = classifieds.find(c => c.id === id);
+      if(ad) {
+           const newStatus = ad.status === 'ACTIVE' ? 'CLOSED' : 'ACTIVE';
+          await supabase.from('classifieds').update({ status: newStatus }).eq('id', id);
+          loadData();
+      }
+  };
 
   const StatusBadge = ({ status }: { status: string }) => {
     const colors = {
@@ -779,256 +858,6 @@ export const Dashboard: React.FC = () => {
             </table>
            </div>
         </div>
-      )}
-
-      {/* --- CONTENT: E-PAPER --- */}
-      {activeTab === 'EPAPER' && canManageSystem && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 animate-in fade-in duration-300">
-            {/* Upload New Page Card */}
-           <div 
-             onClick={() => setIsAddPageModalOpen(true)}
-             className="border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center p-8 text-gray-400 hover:border-indigo-500 hover:text-indigo-600 transition-colors cursor-pointer group min-h-[300px]"
-           >
-              <div className="w-12 h-12 rounded-full bg-gray-100 group-hover:bg-indigo-50 flex items-center justify-center mb-3 transition-colors">
-                <Plus size={24} />
-              </div>
-              <span className="font-semibold">Upload Page</span>
-              <p className="text-xs mt-2 text-center">Add via URL</p>
-           </div>
-
-           {/* Page Cards */}
-           {pages.map(page => (
-               <div key={page.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
-                  <div className="relative aspect-[2/3] bg-gray-100 group">
-                      <img src={page.imageUrl} alt={`Page ${page.pageNumber}`} className="w-full h-full object-cover" />
-                      {/* Overlay */}
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                         <button 
-                           onClick={() => navigate(`/epaper?pageId=${page.id}`)}
-                           className="bg-white text-indigo-900 px-4 py-2 rounded-full font-bold shadow-lg transform translate-y-2 group-hover:translate-y-0 transition-all flex items-center gap-2"
-                         >
-                            <Scissors size={16} /> Edit Regions
-                         </button>
-                      </div>
-                      <span className="absolute top-2 left-2 bg-indigo-600 text-white text-xs px-2 py-1 rounded shadow">Page {page.pageNumber}</span>
-                  </div>
-                  <div className="p-4 flex justify-between items-center bg-gray-50 border-t">
-                      <span className="text-sm font-medium text-gray-600">{page.date}</span>
-                      <button onClick={() => handlePageDelete(page.id)} className="text-red-500 hover:bg-red-100 p-2 rounded-lg transition-colors">
-                          <Trash2 size={18} />
-                      </button>
-                  </div>
-               </div>
-           ))}
-        </div>
-      )}
-
-      {/* --- CONTENT: SETTINGS --- */}
-      {activeTab === 'SETTINGS' && canManageSystem && (
-        <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-6 md:p-8 animate-in fade-in duration-300 relative">
-            {!canDirectlySaveSettings && (
-                 <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6 flex items-start gap-3">
-                     <Lock className="text-orange-500 mt-0.5" size={20} />
-                     <div>
-                         <h4 className="font-bold text-orange-800 text-sm">Restricted Access</h4>
-                         <p className="text-xs text-orange-700 mt-1">As an Editor, you can view settings, but changes require Admin approval.</p>
-                     </div>
-                 </div>
-            )}
-
-            <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-                <Settings className="text-gray-600" />
-                Global Settings
-            </h2>
-            
-            <div className="space-y-8">
-                {/* Seed Database Button */}
-                <div className="bg-blue-50 p-4 md:p-6 rounded-xl border border-blue-100">
-                    <h3 className="text-lg font-semibold text-blue-900 mb-2 flex items-center gap-2">
-                        <Database size={20} /> Database Initialization
-                    </h3>
-                    <p className="text-sm text-blue-700 mb-4">
-                        Populate your Supabase database with the initial set of Mock Data (Articles, Ads, Classifieds, E-Paper). 
-                        Useful for setting up a new environment.
-                    </p>
-                    <button 
-                        onClick={handleSeedDatabase}
-                        disabled={loading}
-                        className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 shadow flex items-center gap-2"
-                    >
-                        {loading ? 'Processing...' : 'Seed Database with Mock Data'}
-                    </button>
-                </div>
-
-                {/* Watermark Section */}
-                <div className="bg-gray-50 p-4 md:p-6 rounded-xl border border-gray-100">
-                    <h3 className="text-lg font-semibold text-gray-800 mb-2">E-Paper Watermark Configuration</h3>
-                    <p className="text-sm text-gray-500 mb-6">These settings apply to all cropped clips generated from the E-Paper viewer.</p>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Watermark Text</label>
-                                <div className="flex items-center bg-white border border-gray-300 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500">
-                                    <Type size={18} className="text-gray-400 mr-2 flex-shrink-0" />
-                                    <input 
-                                        type="text" 
-                                        value={watermarkSettings.text}
-                                        onChange={e => setWatermarkSettings({...watermarkSettings, text: e.target.value})}
-                                        className="w-full outline-none bg-transparent"
-                                        placeholder="e.g. NewsFlow E-Paper"
-                                    />
-                                </div>
-                            </div>
-                            
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Size Scale ({watermarkSettings.scale}x)</label>
-                                <div className="flex items-center gap-3">
-                                  <span className="text-xs text-gray-500">Small</span>
-                                  <input 
-                                      type="range" min="0.5" max="2.5" step="0.1"
-                                      value={watermarkSettings.scale}
-                                      onChange={e => setWatermarkSettings({...watermarkSettings, scale: parseFloat(e.target.value)})}
-                                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                                  />
-                                  <span className="text-xs text-gray-500">Large</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="space-y-4">
-                            <div>
-                                 <label className="block text-sm font-medium text-gray-700 mb-1">Logo URL (Optional)</label>
-                                 <div className="flex items-center bg-white border border-gray-300 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-indigo-500">
-                                    <ImageIcon size={18} className="text-gray-400 mr-2 flex-shrink-0" />
-                                    <input 
-                                        type="url" 
-                                        value={watermarkSettings.imageUrl}
-                                        onChange={e => setWatermarkSettings({...watermarkSettings, imageUrl: e.target.value})}
-                                        className="w-full outline-none bg-transparent"
-                                        placeholder="https://..."
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="flex items-center h-full pt-4 md:pt-0">
-                                 <label className="flex items-center space-x-3 cursor-pointer p-3 bg-white border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 rounded-lg w-full transition-all">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={watermarkSettings.showDate}
-                                        onChange={e => setWatermarkSettings({...watermarkSettings, showDate: e.target.checked})}
-                                        className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300"
-                                    />
-                                    <span className="text-sm font-medium text-gray-700">Include Date in Footer</span>
-                                 </label>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="pt-4 border-t flex flex-col sm:flex-row justify-end gap-3">
-                     <button type="button" onClick={() => window.location.reload()} className="px-6 py-3 rounded-lg text-gray-600 hover:bg-gray-100 font-medium">
-                        Discard Changes
-                     </button>
-                     <button onClick={handleSaveSettings} className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg flex items-center justify-center gap-2">
-                         {canDirectlySaveSettings ? <Save size={20} /> : <MessageCircle size={20} />}
-                         {canDirectlySaveSettings ? 'Save Changes' : 'Request Approval'}
-                     </button>
-                </div>
-            </div>
-        </div>
-      )}
-
-      {/* --- ADD CLASSIFIED MODAL --- */}
-      {isAddClassifiedModalOpen && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-             <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 animate-in zoom-in duration-200">
-                <div className="flex justify-between items-center mb-4">
-                   <h3 className="text-xl font-bold text-gray-800">Add Classified Ad</h3>
-                   <button onClick={() => setIsAddClassifiedModalOpen(false)} className="text-gray-400 hover:text-gray-600">
-                      <X size={24} />
-                   </button>
-                </div>
-                
-                <form onSubmit={handleAddClassified} className="space-y-4">
-                    <div>
-                       <label className="block text-sm font-medium text-gray-700 mb-1">Ad Title</label>
-                       <input 
-                          type="text" required
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
-                          value={newClassifiedData.title}
-                          onChange={e => setNewClassifiedData({...newClassifiedData, title: e.target.value})}
-                          placeholder="e.g. Apartment for Rent"
-                       />
-                    </div>
-                    <div>
-                       <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                       <select 
-                          required
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-                          value={newClassifiedData.category}
-                          onChange={e => setNewClassifiedData({...newClassifiedData, category: e.target.value})}
-                       >
-                          <option value="">Select Category</option>
-                          {categories
-                            .filter(cat => cat.type === 'CLASSIFIED')
-                            .map(cat => (
-                              <option key={cat.id} value={cat.name}>{cat.name}</option>
-                          ))}
-                       </select>
-                       <p className="text-xs text-gray-500 mt-1">Manage categories in the Taxonomy tab.</p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                         <div>
-                           <label className="block text-sm font-medium text-gray-700 mb-1">Price</label>
-                           <input 
-                              type="text" required
-                              className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
-                              value={newClassifiedData.price}
-                              onChange={e => setNewClassifiedData({...newClassifiedData, price: e.target.value})}
-                              placeholder="e.g. $500"
-                           />
-                        </div>
-                        <div>
-                           <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-                           <input 
-                              type="text" required
-                              className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
-                              value={newClassifiedData.location}
-                              onChange={e => setNewClassifiedData({...newClassifiedData, location: e.target.value})}
-                              placeholder="e.g. New York"
-                           />
-                        </div>
-                    </div>
-                    <div>
-                       <label className="block text-sm font-medium text-gray-700 mb-1">Contact Info</label>
-                       <input 
-                          type="text" required
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
-                          value={newClassifiedData.contact}
-                          onChange={e => setNewClassifiedData({...newClassifiedData, contact: e.target.value})}
-                          placeholder="Phone or Email"
-                       />
-                    </div>
-                    <div>
-                       <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                       <textarea 
-                          required rows={3}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                          value={newClassifiedData.content}
-                          onChange={e => setNewClassifiedData({...newClassifiedData, content: e.target.value})}
-                       />
-                    </div>
-                    
-                    <div className="flex justify-end pt-2">
-                       <button type="button" onClick={() => setIsAddClassifiedModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg mr-2">Cancel</button>
-                       <button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-bold flex items-center">
-                          <Save size={18} className="mr-2" /> Publish Ad
-                       </button>
-                    </div>
-                </form>
-             </div>
-          </div>
       )}
 
       {/* --- ADD PAGE MODAL --- */}
