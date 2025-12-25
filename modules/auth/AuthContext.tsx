@@ -24,10 +24,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
   const [isDeviceApproved, setIsDeviceApproved] = useState(false);
 
-  // Helper to get the correct redirect URL based on current environment
   const getRedirectUrl = () => {
-    // For HashRouter, we need to preserve the hash structure if necessary, 
-    // but usually Supabase appends params to the end of the URL.
     return window.location.origin;
   };
 
@@ -162,9 +159,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const forgotPassword = async (email: string) => {
-    // Explicitly set the redirect URL to current origin to avoid localhost:3000 default
+    // Redirect explicitly to the ResetPassword page so the user sees the OTP entry screen
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${getRedirectUrl()}/#/update-password`,
+      redirectTo: `${getRedirectUrl()}/#/reset-password?email=${encodeURIComponent(email)}`,
     });
     return !error;
   };
