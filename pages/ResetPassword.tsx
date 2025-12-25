@@ -2,30 +2,64 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
-import { Mail, Lock, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck, KeyRound, Newspaper } from 'lucide-react';
+import { supabase } from '../services/supabaseClient';
+import { Mail, Lock, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck, KeyRound, Newspaper, Loader2 } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { verifyOTP, updatePassword } = useAuth();
+  const { verifyOTP, updatePassword, isAuthenticated } = useAuth();
 
-  // Extract email from URL to provide context for the user
+  // Extract email/code from URL
   const emailParam = searchParams.get('email') || '';
+  const codeParam = searchParams.get('code') || searchParams.get('token');
   
   const [step, setStep] = useState<1 | 2>(1);
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [initialCheckDone, setInitialCheckDone] = useState(false);
   const [error, setError] = useState('');
 
+  // 1. Check for existing session or Magic Link recovery
   useEffect(() => {
-    if (!emailParam) {
-        // If someone lands here without an email, we can't verify them easily
-        // Navigate back to login
-        console.warn("No email provided for password reset flow.");
+    const checkSession = async () => {
+      // If we are already authenticated (e.g. Magic Link clicked and processed by AuthContext), move to step 2
+      if (isAuthenticated) {
+        setStep(2);
+      }
+      
+      // Also listen specifically for recovery events in case AuthContext is lagging or specific event fired
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'PASSWORD_RECOVERY' || (session && event === 'SIGNED_IN')) {
+          setStep(2);
+        }
+      });
+      
+      setInitialCheckDone(true);
+      return () => subscription.unsubscribe();
+    };
+
+    checkSession();
+  }, [isAuthenticated]);
+
+  // 2. Pre-fill OTP if present in URL (e.g. ?code=123456)
+  useEffect(() => {
+    if (codeParam && codeParam.length === 6) {
+      setOtp(codeParam.split(''));
+      // Optional: Auto-trigger verification could go here if desired, 
+      // but usually safer to let user confirm.
     }
-  }, [emailParam]);
+  }, [codeParam]);
+
+  useEffect(() => {
+    // If no email and not authenticated, we might be lost. 
+    // But if we have a hash (Magic Link), we wait for AuthContext.
+    if (!emailParam && !isAuthenticated && !window.location.hash && initialCheckDone) {
+        // console.warn("No email provided for password reset flow.");
+    }
+  }, [emailParam, isAuthenticated, initialCheckDone]);
 
   const handleOtpChange = (index: number, value: string) => {
     if (!/^\d*$/.test(value)) return;
@@ -51,7 +85,7 @@ export const ResetPassword: React.FC = () => {
     e.preventDefault();
     const token = otp.join('');
     if (token.length < 6) return setError('Please enter the full 6-digit code.');
-    if (!emailParam) return setError('Session expired. Please request a new reset code.');
+    if (!emailParam) return setError('Email context missing. Please request a new code.');
 
     setLoading(true);
     setError('');
@@ -93,6 +127,15 @@ export const ResetPassword: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // If processing magic link hash, show loader briefly
+  if (!initialCheckDone && window.location.hash.includes('access_token')) {
+     return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <Loader2 className="animate-spin text-[#b4a070]" size={48} />
+        </div>
+     );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
