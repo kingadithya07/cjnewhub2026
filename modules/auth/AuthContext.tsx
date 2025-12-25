@@ -1,12 +1,15 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User, UserRole, AuthState } from '../../types';
 import { supabase } from '../../services/supabaseClient';
+import { getDeviceId, getDeviceName } from '../../utils/device';
 
 interface AuthContextType extends AuthState {
-  login: (email: string, password?: string) => Promise<{success: boolean, error?: string}>;
+  login: (email: string, password?: string) => Promise<{success: boolean, error?: string, isPendingDevice?: boolean}>;
   logout: () => void;
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
   forgotPassword: (email: string) => Promise<boolean>;
+  isDeviceApproved: boolean;
+  refreshDeviceStatus: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -16,98 +19,137 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     user: null,
     isAuthenticated: false,
   });
+  const [isDeviceApproved, setIsDeviceApproved] = useState(false);
+
+  const checkDeviceTrust = async (userId: string) => {
+    const currentDeviceId = getDeviceId();
+    
+    const { data: devices, error } = await supabase
+      .from('trusted_devices')
+      .select('*')
+      .eq('profile_id', userId);
+
+    if (error) return false;
+
+    // If this is the user's first device ever
+    if (devices.length === 0) {
+      const { error: insertError } = await supabase
+        .from('trusted_devices')
+        .insert({
+          profile_id: userId,
+          device_id: currentDeviceId,
+          device_name: getDeviceName(),
+          is_primary: true,
+          status: 'APPROVED'
+        });
+      
+      if (!insertError) setIsDeviceApproved(true);
+      return true;
+    }
+
+    // Check if current device is in the list
+    const currentDevice = devices.find(d => d.device_id === currentDeviceId);
+    
+    if (currentDevice) {
+      if (currentDevice.status === 'APPROVED') {
+        setIsDeviceApproved(true);
+        // Update last active
+        await supabase.from('trusted_devices').update({ last_active: new Date().toISOString() }).eq('id', currentDevice.id);
+        return true;
+      } else {
+        setIsDeviceApproved(false);
+        return false;
+      }
+    } else {
+      // New device detected - Create approval request
+      setIsDeviceApproved(false);
+      
+      // Register this device as pending
+      await supabase.from('trusted_devices').insert({
+        profile_id: userId,
+        device_id: currentDeviceId,
+        device_name: getDeviceName(),
+        is_primary: false,
+        status: 'PENDING'
+      });
+
+      // Create a security request for the primary device to see
+      await supabase.from('security_requests').insert({
+        profile_id: userId,
+        request_type: 'DEVICE_ADD',
+        details: { device_id: currentDeviceId, device_name: getDeviceName() },
+        requested_from_device: currentDeviceId
+      });
+
+      return false;
+    }
+  };
 
   const fetchUserProfile = async (userId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
       if (data && !error) {
         setAuth({
-          user: {
-            id: data.id,
-            name: data.name,
-            email: data.email,
-            role: data.role as UserRole,
-            avatar: data.avatar
-          },
+          user: { id: data.id, name: data.name, email: data.email, role: data.role as UserRole, avatar: data.avatar },
           isAuthenticated: true
         });
-      } else {
-        // Fallback for new signups while trigger processes
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          setAuth({
-            user: {
-              id: user.id,
-              name: user.user_metadata?.name || user.email || 'User',
-              email: user.email || '',
-              role: (user.user_metadata?.role as UserRole) || UserRole.READER,
-            },
-            isAuthenticated: true
-          });
-        }
+        await checkDeviceTrust(userId);
       }
-    } catch (err) {
-      console.error("Profile error:", err);
-    }
+    } catch (err) { console.error("Profile error:", err); }
   };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        fetchUserProfile(session.user.id);
-      }
+      if (session?.user) fetchUserProfile(session.user.id);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        fetchUserProfile(session.user.id);
-      } else {
-        setAuth({ user: null, isAuthenticated: false });
-      }
+      if (session?.user) fetchUserProfile(session.user.id);
+      else { setAuth({ user: null, isAuthenticated: false }); setIsDeviceApproved(false); }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const login = async (email: string, password?: string): Promise<{success: boolean, error?: string}> => {
+  const login = async (email: string, password?: string) => {
     if (!password) return { success: false, error: "Password required" };
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { success: false, error: error.message };
-    return { success: true };
-  };
-
-  const register = async (name: string, email: string, password: string, role: UserRole): Promise<{success: boolean, error?: string}> => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { name, role },
-        emailRedirectTo: window.location.origin
-      }
-    });
     
-    if (error) return { success: false, error: error.message };
-    if (data.user) await fetchUserProfile(data.user.id);
+    if (data.user) {
+      const approved = await checkDeviceTrust(data.user.id);
+      return { success: true, isPendingDevice: !approved };
+    }
     return { success: true };
   };
 
-  const forgotPassword = async (email: string): Promise<boolean> => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email);
-    return !error;
+  const register = async (name: string, email: string, password: string, role: UserRole) => {
+    const { data, error } = await supabase.auth.signUp({
+      email, password, options: { data: { name, role }, emailRedirectTo: window.location.origin }
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  };
+
+  const refreshDeviceStatus = async () => {
+    if (auth.user) await checkDeviceTrust(auth.user.id);
   };
 
   const logout = async () => {
     await supabase.auth.signOut();
     setAuth({ user: null, isAuthenticated: false });
+    setIsDeviceApproved(false);
+  };
+
+  const forgotPassword = async (email: string) => {
+    // Note: Per user request, password reset/forgot should ideally go through approval
+    // but standard supabase sends email. We will add the approval layer in the profile edit UI.
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    return !error;
   };
 
   return (
-    <AuthContext.Provider value={{ ...auth, login, logout, register, forgotPassword }}>
+    <AuthContext.Provider value={{ ...auth, isDeviceApproved, login, logout, register, forgotPassword, refreshDeviceStatus }}>
       {children}
     </AuthContext.Provider>
   );
