@@ -2,10 +2,11 @@
 import { Article, EPaperPage, User, UserRole, Advertisement, WatermarkSettings, Category, Tag, Classified, Message, Mail } from '../types';
 
 export const MOCK_USERS: User[] = [
-  { id: '1', name: 'Admin User', email: 'admin@news.com', password: 'password', role: UserRole.ADMIN, avatar: 'https://picsum.photos/id/64/100/100' },
-  { id: '2', name: 'Editor Dave', email: 'editor@news.com', password: 'password', role: UserRole.EDITOR, avatar: 'https://picsum.photos/id/65/100/100' },
-  { id: '3', name: 'Publisher Sarah', email: 'pub@news.com', password: 'password', role: UserRole.PUBLISHER, avatar: 'https://picsum.photos/id/66/100/100' },
-  { id: '4', name: 'Reader John', email: 'reader@news.com', password: 'password', role: UserRole.READER, avatar: 'https://picsum.photos/id/67/100/100' },
+  // Removed password property as it is not part of the User interface
+  { id: '1', name: 'Admin User', email: 'admin@news.com', role: UserRole.ADMIN, avatar: 'https://picsum.photos/id/64/100/100' },
+  { id: '2', name: 'Editor Dave', email: 'editor@news.com', role: UserRole.EDITOR, avatar: 'https://picsum.photos/id/65/100/100' },
+  { id: '3', name: 'Publisher Sarah', email: 'pub@news.com', role: UserRole.PUBLISHER, avatar: 'https://picsum.photos/id/66/100/100' },
+  { id: '4', name: 'Reader John', email: 'reader@news.com', role: UserRole.READER, avatar: 'https://picsum.photos/id/67/100/100' },
 ];
 
 export const MOCK_SETTINGS: { watermark: WatermarkSettings } = {
@@ -75,7 +76,7 @@ export const MOCK_CLASSIFIEDS: Classified[] = [
     location: 'West End',
     price: '$80',
     contact: '555-0999',
-    category: 'Furniture', // Note: Make sure to map this to new categories if strictly enforcing or just display text
+    category: 'Furniture',
     createdAt: '2023-10-25',
     status: 'CLOSED'
   }

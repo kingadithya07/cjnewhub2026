@@ -12,30 +12,60 @@ export interface User {
   email: string;
   role: UserRole;
   avatar?: string;
-  password?: string; // Added for auth simulation
 }
 
 export interface Article {
   id: string;
   title: string;
-  summary: string; // Short format
-  content: string; // HTML Content
+  summary: string;
+  content: string;
   authorId: string;
   authorName: string;
-  authorAvatar?: string; // Added for profile picture
+  authorAvatar?: string;
   status: 'DRAFT' | 'PENDING' | 'PUBLISHED';
   category: string;
   createdAt: string;
   thumbnailUrl: string;
-  isFeatured?: boolean; // Controls visibility in Home Slider
-  isTrending?: boolean; // Controls visibility in Trending Sidebar
+  isFeatured?: boolean;
+  isTrending?: boolean;
 }
 
+export interface CropRegion {
+  id: string;
+  title: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  linkedArticleId?: string;
+}
+
+export interface EPaperPage {
+  id: string;
+  date: string;
+  pageNumber: number;
+  imageUrl: string;
+  regions?: CropRegion[];
+}
+
+export interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
+}
+
+export interface WatermarkSettings {
+  text: string;
+  imageUrl: string;
+  scale: number;
+  showDate: boolean;
+}
+
+// Fixed missing exports for modules/services
 export interface Category {
   id: string;
   name: string;
   type: 'ARTICLE' | 'CLASSIFIED';
-  count?: number; // Optional article/ad count for display
+  count: number;
 }
 
 export interface Tag {
@@ -64,55 +94,24 @@ export interface Advertisement {
   status: 'ACTIVE' | 'INACTIVE';
 }
 
-export interface CropRegion {
-  id: string;
-  title: string;
-  x: number; // Percentage (0-100)
-  y: number; // Percentage (0-100)
-  width: number; // Percentage (0-100)
-  height: number; // Percentage (0-100)
-  linkedArticleId?: string;
-}
-
-export interface EPaperPage {
-  id: string;
-  date: string;
-  pageNumber: number;
-  imageUrl: string;
-  regions?: CropRegion[];
-}
-
-export interface AuthState {
-  user: User | null;
-  isAuthenticated: boolean;
-}
-
-export interface WatermarkSettings {
-  text: string;
-  imageUrl: string;
-  scale: number;
-  showDate: boolean;
-}
-
-// --- COMMUNICATION TYPES ---
 export interface Attachment {
   id: string;
   type: 'IMAGE' | 'FILE';
-  url: string; // Base64 or URL
+  url: string;
   name: string;
 }
 
 export interface Message {
   id: string;
-  channel: string; // Changed to string to support DM channel IDs (e.g. "1-2") and "ANNOUNCEMENTS"
+  channel: string;
   senderId: string;
   senderName: string;
-  senderAvatar?: string;
   senderRole: UserRole;
+  senderAvatar?: string;
   content: string;
-  attachments?: Attachment[];
   createdAt: string;
-  isSystem?: boolean; // For auto-generated alerts
+  isSystem: boolean;
+  attachments?: Attachment[];
 }
 
 export interface Mail {
@@ -125,7 +124,7 @@ export interface Mail {
   recipientEmail: string;
   subject: string;
   content: string;
-  attachments?: Attachment[];
   createdAt: string;
   isRead: boolean;
+  attachments?: Attachment[];
 }

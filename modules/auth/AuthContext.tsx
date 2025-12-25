@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User, UserRole, AuthState } from '../../types';
 import { supabase } from '../../services/supabaseClient';
@@ -17,48 +18,37 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isAuthenticated: false,
   });
 
-  // Fetch user profile (including role) from 'profiles' table
-  const fetchProfile = async (userId: string, email: string) => {
-    try {
-        const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', userId)
-            .single();
+  const fetchUserProfile = async (userId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
 
-        if (data) {
-            const user: User = {
-                id: data.id,
-                name: data.name,
-                email: data.email,
-                role: data.role as UserRole,
-                avatar: data.avatar
-            };
-            setAuth({ user, isAuthenticated: true });
-        } else {
-             // Fallback if profile trigger failed
-             setAuth({ 
-                user: { id: userId, email: email, name: email.split('@')[0], role: UserRole.READER }, 
-                isAuthenticated: true 
-             });
-        }
-    } catch (e) {
-        console.error("Profile fetch error", e);
+    if (data && !error) {
+      setAuth({
+        user: {
+          id: data.id,
+          name: data.name,
+          email: data.email,
+          role: data.role as UserRole,
+          avatar: data.avatar
+        },
+        isAuthenticated: true
+      });
     }
   };
 
   useEffect(() => {
-    // Check active session on mount
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        fetchProfile(session.user.id, session.user.email!);
+        fetchUserProfile(session.user.id);
       }
     });
 
-    // Listen for changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        fetchProfile(session.user.id, session.user.email!);
+        fetchUserProfile(session.user.id);
       } else {
         setAuth({ user: null, isAuthenticated: false });
       }
@@ -69,29 +59,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const login = async (email: string, password?: string): Promise<boolean> => {
     if (!password) return false;
-    const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     return !error;
   };
 
   const register = async (name: string, email: string, password: string, role: UserRole): Promise<boolean> => {
     const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-            data: { 
-              name,
-              role // Pass role to Supabase metadata so trigger can see it
-            } 
-        }
+      email,
+      password,
+      options: {
+        data: { name, role } // Metadata used by the SQL trigger
+      }
     });
-
-    if (!error) {
-        return true;
-    }
-    return false;
+    return !error;
   };
 
   const forgotPassword = async (email: string): Promise<boolean> => {
@@ -113,8 +93,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
