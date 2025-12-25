@@ -1,10 +1,9 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User, UserRole, AuthState } from '../../types';
-import { supabase, supabaseUrl } from '../../services/supabaseClient';
+import { supabase } from '../../services/supabaseClient';
 import { MOCK_USERS } from '../../services/mockData';
 
-// Added missing properties to AuthContextType to satisfy usage in Dashboard and the provider itself
 interface AuthContextType extends AuthState {
   login: (email: string, password?: string) => Promise<{success: boolean, error?: string, requiresVerification?: boolean}>;
   loginAsDemo: (role?: UserRole) => void;
@@ -29,24 +28,25 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'online' | 'offline'>('connecting');
 
-  // Load session from local storage since we aren't using Supabase Auth
   useEffect(() => {
     const savedUser = localStorage.getItem('newsflow_session');
     if (savedUser) {
-      setAuth({ user: JSON.parse(savedUser), isAuthenticated: true });
+      try {
+        setAuth({ user: JSON.parse(savedUser), isAuthenticated: true });
+      } catch (e) {
+        localStorage.removeItem('newsflow_session');
+      }
     }
     checkConnection();
   }, []);
 
   const checkConnection = async () => {
     try {
-      const { data, error } = await supabase.from('profiles').select('count').limit(1);
+      const { error } = await supabase.from('profiles').select('id').limit(1);
       if (error) throw error;
       setConnectionStatus('online');
-      return true;
     } catch (err) {
       setConnectionStatus('offline');
-      return false;
     }
   };
 
@@ -54,18 +54,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const register = async (name: string, email: string, password: string, role: UserRole) => {
     const code = generateCode();
-    const expiry = new Date(Date.now() + 15 * 60000).toISOString(); // 15 mins
+    const expiry = new Date(Date.now() + 15 * 60000).toISOString();
 
     try {
-      // Check if user exists
-      const { data: existing } = await supabase.from('profiles').select('id').eq('email', email).single();
-      if (existing) return { success: false, error: "Email already registered." };
+      const { data: existing } = await supabase.from('profiles').select('id').eq('email', email).maybeSingle();
+      if (existing) return { success: false, error: "This email is already registered." };
 
-      const { error } = await supabase.from('profiles').insert({
+      const { error: insertError } = await supabase.from('profiles').insert({
         id: crypto.randomUUID(),
         name,
         email,
-        password_plain: password, // Plain for this exercise, usually hashed
+        password_plain: password,
         role,
         is_verified: false,
         verification_code: code,
@@ -73,15 +72,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`
       });
 
-      if (error) throw error;
+      if (insertError) throw insertError;
 
-      // Simulate Email
-      console.log(`%c[EMAIL SYSTEM] Verification code for ${email}: ${code}`, "color: #b4a070; font-weight: bold; font-size: 14px;");
-      alert(`SYSTEM: Verification code sent to ${email}: ${code}`);
+      // Simulation
+      console.log(`[VERIFICATION] Code for ${email}: ${code}`);
+      alert(`SYSTEM: Your verification code is ${code}`);
       
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: e.message };
+      return { success: false, error: e.message || "Registration failed." };
     }
   };
 
@@ -92,12 +91,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         .select('*')
         .eq('email', email)
         .eq('verification_code', code)
-        .single();
+        .maybeSingle();
 
-      if (error || !data) return { success: false, error: "Invalid verification code." };
+      if (error || !data) return { success: false, error: "Invalid code." };
       
       const expiry = new Date(data.code_expiry);
-      if (expiry < new Date()) return { success: false, error: "Code has expired." };
+      if (expiry < new Date()) return { success: false, error: "Code expired." };
 
       await supabase.from('profiles').update({ 
         is_verified: true, 
@@ -111,7 +110,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: e.message };
+      return { success: false, error: "Verification failed." };
     }
   };
 
@@ -122,21 +121,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         .select('*')
         .eq('email', email)
         .eq('password_plain', password)
-        .single();
+        .maybeSingle();
 
-      if (error || !data) return { success: false, error: "Invalid email or password." };
+      if (error || !data) return { success: false, error: "Invalid credentials." };
       
       if (!data.is_verified) {
-        // Resend code if needed
         const code = generateCode();
         await supabase.from('profiles').update({ 
           verification_code: code, 
           code_expiry: new Date(Date.now() + 15 * 60000).toISOString() 
         }).eq('email', email);
-        
-        console.log(`%c[EMAIL SYSTEM] New code for ${email}: ${code}`, "color: #b4a070; font-weight: bold;");
-        alert(`SYSTEM: Your account is not verified. New code sent: ${code}`);
-        
+        alert(`VERIFICATION: New code sent to ${email}: ${code}`);
         return { success: false, requiresVerification: true };
       }
 
@@ -146,48 +141,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Authentication failed." };
+      return { success: false, error: "Login failed." };
     }
   };
 
   const requestResetCode = async (email: string) => {
     const code = generateCode();
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .update({ 
-          verification_code: code, 
-          code_expiry: new Date(Date.now() + 15 * 60000).toISOString() 
-        })
-        .eq('email', email)
-        .select();
+      const { data, error } = await supabase.from('profiles').update({ 
+        verification_code: code, 
+        code_expiry: new Date(Date.now() + 15 * 60000).toISOString() 
+      }).eq('email', email).select();
 
-      if (error || !data.length) return { success: false, error: "Email not found." };
-      
-      alert(`SYSTEM: Reset code sent to ${email}: ${code}`);
+      if (error || !data || data.length === 0) return { success: false, error: "Email not found." };
+      alert(`RESET: Your password reset code is ${code}`);
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Failed to send code." };
+      return { success: false, error: "Request failed." };
     }
   };
 
   const resetPasswordWithCode = async (email: string, code: string, newPassword: string) => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('email', email)
-        .eq('verification_code', code)
-        .single();
-
-      if (error || !data) return { success: false, error: "Invalid reset code." };
-
-      await supabase.from('profiles').update({ 
-        password_plain: newPassword, 
-        verification_code: null, 
-        code_expiry: null 
-      }).eq('email', email);
-
+      const { data, error } = await supabase.from('profiles').select('*').eq('email', email).eq('verification_code', code).maybeSingle();
+      if (error || !data) return { success: false, error: "Invalid code." };
+      await supabase.from('profiles').update({ password_plain: newPassword, verification_code: null, code_expiry: null }).eq('email', email);
       return { success: true };
     } catch (e: any) {
       return { success: false, error: "Reset failed." };
@@ -205,10 +183,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.setItem('newsflow_session', JSON.stringify(mockUser));
   };
 
-  const refreshDeviceStatus = async () => {
-    await checkConnection();
-  };
-
   return (
     <AuthContext.Provider value={{ 
       ...auth, 
@@ -220,11 +194,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       verifyAccount,
       requestResetCode,
       resetPasswordWithCode,
-      // Fixed: Interface now includes these placeholder implementations to prevent type errors
       updatePassword: async () => ({ success: false }),
       forgotPassword: async () => ({ success: false }),
       isDeviceApproved: true,
-      refreshDeviceStatus 
+      refreshDeviceStatus: async () => { await checkConnection(); }
     }}>
       {children}
     </AuthContext.Provider>
