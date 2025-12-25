@@ -1,17 +1,75 @@
 
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
-import { Lock, CheckCircle, AlertCircle, ShieldCheck } from 'lucide-react';
+import { Mail, Lock, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck, KeyRound, Newspaper } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { updatePassword } = useAuth();
+  const { verifyOTP, updatePassword } = useAuth();
 
+  // Extract email from URL to provide context for the user
+  const emailParam = searchParams.get('email') || '';
+  
+  const [step, setStep] = useState<1 | 2>(1);
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!emailParam) {
+        // If someone lands here without an email, we can't verify them easily
+        // Navigate back to login
+        console.warn("No email provided for password reset flow.");
+    }
+  }, [emailParam]);
+
+  const handleOtpChange = (index: number, value: string) => {
+    if (!/^\d*$/.test(value)) return;
+    const newOtp = [...otp];
+    newOtp[index] = value.slice(-1);
+    setOtp(newOtp);
+
+    // Auto-focus next input
+    if (value && index < 5) {
+      const nextInput = document.getElementById(`reset-otp-${index + 1}`);
+      nextInput?.focus();
+    }
+  };
+
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === 'Backspace' && !otp[index] && index > 0) {
+      const prevInput = document.getElementById(`reset-otp-${index - 1}`);
+      prevInput?.focus();
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const token = otp.join('');
+    if (token.length < 6) return setError('Please enter the full 6-digit code.');
+    if (!emailParam) return setError('Session expired. Please request a new reset code.');
+
+    setLoading(true);
+    setError('');
+    
+    try {
+      // Step 1: Verify the 6-digit PIN manually
+      const result = await verifyOTP(emailParam, token, 'recovery');
+      if (result.success) {
+        setStep(2); // Success! Move to password creation
+      } else {
+        setError(result.error || 'The code entered is invalid or has expired.');
+      }
+    } catch (err) {
+      setError('Verification failed. Please check your connection and try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,17 +80,15 @@ export const ResetPassword: React.FC = () => {
     setError('');
 
     try {
-      // We attempt to update the password using the session established by the email link
+      // Step 2: Update the password for the verified user
       const result = await updatePassword(password);
-      
       if (result.success) {
         navigate('/auth-success?type=password-reset-success');
       } else {
-        // If this fails, it usually means the link expired or the session is invalid
-        setError('Unable to update password. The reset link may have expired. Please request a new one.');
+        setError(result.error || 'Failed to update password. Your session may have timed out.');
       }
     } catch (err) {
-      setError('An unexpected error occurred.');
+      setError('An unexpected error occurred during password update.');
     } finally {
       setLoading(false);
     }
@@ -42,17 +98,18 @@ export const ResetPassword: React.FC = () => {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
         
+        {/* Newspaper Header Styling */}
         <div className="bg-[#111827] p-8 text-center border-b-4 border-[#b4a070]">
            <div className="flex justify-center mb-6">
               <div className="bg-[#b4a070] text-black p-3 rounded-full shadow-lg">
-                <ShieldCheck size={28} />
+                {step === 1 ? <KeyRound size={28} /> : <ShieldCheck size={28} />}
               </div>
            </div>
            <h2 className="text-3xl font-black text-white mb-2" style={{ fontFamily: '"Playfair Display", serif' }}>
-             Reset Password
+             {step === 1 ? 'Verification' : 'Security Update'}
            </h2>
            <p className="text-gray-400 text-sm tracking-widest uppercase font-bold">
-             Set Your New Credentials
+             {step === 1 ? 'Enter Recovery Code' : 'Create New Password'}
            </p>
         </div>
 
@@ -64,46 +121,103 @@ export const ResetPassword: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={handleResetPassword} className="space-y-6">
-            <div>
-              <label className="block text-xs font-black text-gray-500 uppercase tracking-[0.2em] mb-2">New Password</label>
-              <div className="relative group">
-                <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-[#b4a070] transition-colors" size={20} />
-                <input
-                  type="password" required minLength={6} autoFocus
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-12 pr-4 py-4 border-2 border-gray-50 rounded-2xl focus:ring-4 focus:ring-[#b4a070]/10 focus:border-[#b4a070] outline-none transition-all text-gray-900 font-medium"
-                  placeholder="••••••••"
-                />
-              </div>
-            </div>
+          {step === 1 ? (
+            <div className="animate-in fade-in slide-in-from-left duration-300">
+              <p className="text-gray-600 text-center mb-8 text-sm leading-relaxed">
+                A 6-digit recovery code was sent to <br/>
+                <span className="font-bold text-gray-900">{emailParam || 'your registered email'}</span>.
+                Please enter it below to proceed.
+              </p>
 
-            <div>
-              <label className="block text-xs font-black text-gray-500 uppercase tracking-[0.2em] mb-2">Confirm New Password</label>
-              <div className="relative group">
-                <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-[#b4a070] transition-colors" size={20} />
-                <input
-                  type="password" required minLength={6}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full pl-12 pr-4 py-4 border-2 border-gray-50 rounded-2xl focus:ring-4 focus:ring-[#b4a070]/10 focus:border-[#b4a070] outline-none transition-all text-gray-900 font-medium"
-                  placeholder="••••••••"
-                />
-              </div>
-            </div>
+              <form onSubmit={handleVerifyOtp} className="space-y-8">
+                <div className="flex justify-between gap-2 px-2">
+                  {otp.map((digit, index) => (
+                    <input
+                      key={index}
+                      id={`reset-otp-${index}`}
+                      type="text"
+                      maxLength={1}
+                      value={digit}
+                      autoFocus={index === 0}
+                      onChange={(e) => handleOtpChange(index, e.target.value)}
+                      onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                      className="w-11 h-14 md:w-12 md:h-16 text-center text-2xl font-black border-2 border-gray-100 rounded-xl focus:border-[#b4a070] focus:ring-4 focus:ring-[#b4a070]/10 outline-none transition-all shadow-sm"
+                    />
+                  ))}
+                </div>
 
-            <div className="pt-4">
-              <button
-                type="submit"
-                disabled={loading || !password || password !== confirmPassword}
-                className="w-full bg-[#111827] hover:bg-black text-white font-bold py-5 rounded-2xl flex items-center justify-center space-x-3 transition-all shadow-xl active:scale-95 disabled:opacity-50"
-              >
-                <span className="text-lg">{loading ? 'Updating...' : 'Update Password'}</span>
-                {!loading && <CheckCircle size={22} className="text-[#b4a070]" />}
-              </button>
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={loading || otp.some(d => !d)}
+                    className="w-full bg-[#111827] hover:bg-black text-white font-bold py-5 rounded-2xl flex items-center justify-center space-x-3 transition-all shadow-xl active:scale-95 disabled:opacity-50 disabled:grayscale"
+                  >
+                    <span className="text-lg">{loading ? 'Verifying...' : 'Verify Code'}</span>
+                    {!loading && <ArrowRight size={22} className="text-[#b4a070]" />}
+                  </button>
+                </div>
+                
+                <div className="text-center pt-2">
+                  <Link to="/login" className="inline-flex items-center gap-2 text-xs font-black text-gray-400 hover:text-indigo-600 uppercase tracking-widest transition-colors">
+                    <ArrowLeft size={14} /> Back to Sign In
+                  </Link>
+                </div>
+              </form>
             </div>
-          </form>
+          ) : (
+            <div className="animate-in fade-in slide-in-from-right duration-500">
+               <div className="mb-8 text-center">
+                  <p className="text-gray-600 text-sm">Identity verified. Please set your new password below.</p>
+               </div>
+
+               <form onSubmit={handleResetPassword} className="space-y-6">
+                <div>
+                  <label className="block text-xs font-black text-gray-500 uppercase tracking-[0.2em] mb-2">New Password</label>
+                  <div className="relative group">
+                    <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-[#b4a070] transition-colors" size={20} />
+                    <input
+                      type="password" required minLength={6} autoFocus
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full pl-12 pr-4 py-4 border-2 border-gray-50 rounded-2xl focus:ring-4 focus:ring-[#b4a070]/10 focus:border-[#b4a070] outline-none transition-all text-gray-900 font-medium"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-gray-500 uppercase tracking-[0.2em] mb-2">Confirm New Password</label>
+                  <div className="relative group">
+                    <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-[#b4a070] transition-colors" size={20} />
+                    <input
+                      type="password" required minLength={6}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full pl-12 pr-4 py-4 border-2 border-gray-50 rounded-2xl focus:ring-4 focus:ring-[#b4a070]/10 focus:border-[#b4a070] outline-none transition-all text-gray-900 font-medium"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-4">
+                  <button
+                    type="submit"
+                    disabled={loading || !password || password !== confirmPassword}
+                    className="w-full bg-[#111827] hover:bg-black text-white font-bold py-5 rounded-2xl flex items-center justify-center space-x-3 transition-all shadow-xl active:scale-95 disabled:opacity-50"
+                  >
+                    <span className="text-lg">{loading ? 'Updating...' : 'Set New Password'}</span>
+                    {!loading && <CheckCircle2 size={22} className="text-[#b4a070]" />}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 bg-gray-50 text-center">
+            <h1 className="text-xl font-black tracking-tight text-gray-400" style={{ fontFamily: '"Playfair Display", serif' }}>
+                CJ<span className="text-[#b4a070]/50">NEWS</span>HUB
+            </h1>
         </div>
       </div>
     </div>

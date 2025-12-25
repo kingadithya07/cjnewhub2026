@@ -8,8 +8,8 @@ interface AuthContextType extends AuthState {
   login: (email: string, password?: string) => Promise<{success: boolean, error?: string, isPendingDevice?: boolean}>;
   logout: () => void;
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
+  forgotPassword: (email: string) => Promise<boolean>;
   updatePassword: (newPassword: string) => Promise<{success: boolean, error?: string}>;
-  forgotPassword: (email: string) => Promise<{success: boolean, error?: string}>;
   verifyOTP: (email: string, token: string, type: 'signup' | 'recovery') => Promise<{success: boolean, error?: string}>;
   isDeviceApproved: boolean;
   refreshDeviceStatus: () => Promise<void>;
@@ -148,15 +148,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: true };
   };
 
-  const forgotPassword = async (email: string) => {
-    // Redirect to root to allow CatchAllRoute to parse the hash token correctly
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin
-    });
-    if (error) return { success: false, error: error.message };
-    return { success: true };
-  };
-
   const refreshDeviceStatus = async () => {
     if (auth.user) await checkDeviceTrust(auth.user.id);
   };
@@ -165,6 +156,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await supabase.auth.signOut();
     setAuth({ user: null, isAuthenticated: false });
     setIsDeviceApproved(false);
+  };
+
+  const forgotPassword = async (email: string) => {
+    // Redirect explicitly to the ResetPassword page so the user sees the OTP entry screen
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${getRedirectUrl()}/#/reset-password?email=${encodeURIComponent(email)}`,
+    });
+    return !error;
   };
 
   const updatePassword = async (newPassword: string) => {
@@ -176,7 +175,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <AuthContext.Provider value={{ ...auth, isDeviceApproved, login, logout, register, updatePassword, forgotPassword, refreshDeviceStatus, verifyOTP }}>
+    <AuthContext.Provider value={{ ...auth, isDeviceApproved, login, logout, register, forgotPassword, updatePassword, refreshDeviceStatus, verifyOTP }}>
       {children}
     </AuthContext.Provider>
   );
