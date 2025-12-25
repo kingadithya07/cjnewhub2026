@@ -54,22 +54,29 @@ export const ChatSystem: React.FC = () => {
   // --- Initialization & Simulation ---
   useEffect(() => {
     const loadData = () => {
-      // Load Chat
-      const storedMessages = localStorage.getItem('newsflow_chat_messages');
-      if (storedMessages) {
-        setMessages(JSON.parse(storedMessages));
-      } else {
-        setMessages(MOCK_MESSAGES);
-        localStorage.setItem('newsflow_chat_messages', JSON.stringify(MOCK_MESSAGES));
-      }
+      try {
+          // Load Chat
+          const storedMessages = localStorage.getItem('newsflow_chat_messages');
+          if (storedMessages) {
+            setMessages(JSON.parse(storedMessages));
+          } else {
+            setMessages(MOCK_MESSAGES);
+            localStorage.setItem('newsflow_chat_messages', JSON.stringify(MOCK_MESSAGES));
+          }
 
-      // Load Mail
-      const storedMails = localStorage.getItem('newsflow_mails');
-      if (storedMails) {
-        setMails(JSON.parse(storedMails));
-      } else {
-        setMails(MOCK_MAILS);
-        localStorage.setItem('newsflow_mails', JSON.stringify(MOCK_MAILS));
+          // Load Mail
+          const storedMails = localStorage.getItem('newsflow_mails');
+          if (storedMails) {
+            setMails(JSON.parse(storedMails));
+          } else {
+            setMails(MOCK_MAILS);
+            localStorage.setItem('newsflow_mails', JSON.stringify(MOCK_MAILS));
+          }
+      } catch (e) {
+          console.error("Error loading chat data", e);
+          // Fallback
+          setMessages(MOCK_MESSAGES);
+          setMails(MOCK_MAILS);
       }
     };
 
@@ -340,13 +347,15 @@ export const ChatSystem: React.FC = () => {
         </div>
 
         <div className="p-4 border-t border-gray-200 bg-white">
-           <div className="flex items-center gap-2">
-              <img src={user?.avatar} alt={user?.name} className="w-8 h-8 rounded-full bg-gray-200 object-cover" />
-              <div className="overflow-hidden">
-                 <p className="text-sm font-bold text-gray-800 truncate">{user?.name}</p>
-                 <p className="text-xs text-gray-500 truncate">{user?.role}</p>
-              </div>
-           </div>
+           {user && (
+            <div className="flex items-center gap-2">
+                <img src={user.avatar} alt={user.name} className="w-8 h-8 rounded-full bg-gray-200 object-cover" />
+                <div className="overflow-hidden">
+                    <p className="text-sm font-bold text-gray-800 truncate">{user.name}</p>
+                    <p className="text-xs text-gray-500 truncate">{user.role}</p>
+                </div>
+            </div>
+           )}
         </div>
       </div>
 

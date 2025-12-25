@@ -70,7 +70,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
            <div className="hidden md:flex items-center gap-4">
               {isAuthenticated ? (
                  <div className="flex items-center gap-3">
-                    <span className="hidden md:inline font-bold">WELCOME, {user?.name.toUpperCase()}</span>
+                    <span className="hidden md:inline font-bold">WELCOME, {user?.name?.toUpperCase() || 'USER'}</span>
                     {(user?.role === UserRole.ADMIN || user?.role === UserRole.EDITOR || user?.role === UserRole.PUBLISHER) && (
                          <Link to="/dashboard" className="hover:text-indigo-600 flex items-center gap-1 font-bold">
                              <LayoutDashboard size={12} /> DASHBOARD
