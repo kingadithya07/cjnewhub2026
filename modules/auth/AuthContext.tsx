@@ -18,37 +18,41 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const fetchUserProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-    if (data && !error) {
-      setAuth({
-        user: {
-          id: data.id,
-          name: data.name,
-          email: data.email,
-          role: data.role as UserRole,
-          avatar: data.avatar
-        },
-        isAuthenticated: true
-      });
-    } else {
-        // Fallback to basic auth user info if profile isn't ready yet (trigger lag)
+      if (data && !error) {
+        setAuth({
+          user: {
+            id: data.id,
+            name: data.name,
+            email: data.email,
+            role: data.role as UserRole,
+            avatar: data.avatar
+          },
+          isAuthenticated: true
+        });
+      } else {
+        // Fallback if profile trigger hasn't finished yet
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-            setAuth({
-                user: {
-                    id: user.id,
-                    name: user.user_metadata?.name || user.email || 'User',
-                    email: user.email || '',
-                    role: (user.user_metadata?.role as UserRole) || UserRole.READER,
-                },
-                isAuthenticated: true
-            });
+          setAuth({
+            user: {
+              id: user.id,
+              name: user.user_metadata?.name || user.email || 'User',
+              email: user.email || '',
+              role: (user.user_metadata?.role as UserRole) || UserRole.READER,
+            },
+            isAuthenticated: true
+          });
         }
+      }
+    } catch (err) {
+      console.error("Error fetching profile:", err);
     }
   };
 
@@ -82,14 +86,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       email,
       password,
       options: {
-        data: { name, role }, // Role passed to SQL trigger
+        data: { name, role }, // Role passed to SQL trigger via raw_user_meta_data
         emailRedirectTo: window.location.origin
       }
     });
     
     if (error) return { success: false, error: error.message };
     
-    // If auto-confirm is on, we'll have a user session
     if (data.user) {
         await fetchUserProfile(data.user.id);
     }
