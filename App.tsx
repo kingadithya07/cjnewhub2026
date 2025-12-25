@@ -184,6 +184,10 @@ const Home: React.FC = () => {
 };
 
 const App: React.FC = () => {
+  useEffect(() => {
+    console.log("App mounted. If you see this, React is running.");
+  }, []);
+
   return (
     <AuthProvider>
       <HashRouter>
