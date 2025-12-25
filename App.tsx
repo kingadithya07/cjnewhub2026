@@ -1,6 +1,5 @@
-
-import React, { useMemo, useState, useEffect } from 'react';
-import { HashRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
+import React, { useMemo, useEffect, useState } from 'react';
+import { HashRouter, Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './modules/auth/AuthContext';
 import { Layout } from './components/Layout';
 import { ArticleList } from './modules/articles/ArticleList';
@@ -17,6 +16,25 @@ import { HeroSlider } from './components/HeroSlider';
 import { supabase } from './services/supabaseClient';
 import { Article, UserRole, EPaperPage, Classified } from './types';
 import { Store, Newspaper, TrendingUp, MapPin, DollarSign, Loader2 } from 'lucide-react';
+import { MOCK_ARTICLES, MOCK_EPAPER } from './services/mockData';
+
+// Component to listen for global auth events (like Password Recovery redirect)
+const AuthListener = () => {
+  const navigate = useNavigate();
+  
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        // Supabase redirect with HashRouter often clobbers the route.
+        // We force navigation to the reset password page when this event fires.
+        navigate('/reset-password');
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [navigate]);
+
+  return null;
+};
 
 const ProtectedRoute = ({ children, roles }: { children?: React.ReactNode, roles?: UserRole[] }) => {
   const { user, isAuthenticated } = useAuth();
@@ -58,6 +76,9 @@ const Home: React.FC = () => {
             isTrending: a.is_trending,
             createdAt: a.created_at
           })));
+        } else {
+             // Fallback to Mock if DB empty
+             setArticles(MOCK_ARTICLES.filter(a => a.status === 'PUBLISHED'));
         }
 
         const { data: cls } = await supabase
@@ -184,6 +205,7 @@ const App: React.FC = () => {
   const [epaperPages, setEpaperPages] = useState<EPaperPage[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Initialize E-Paper Data
   useEffect(() => {
     const fetchEPaper = async () => {
       setLoading(true);
@@ -193,7 +215,7 @@ const App: React.FC = () => {
         .order('date', { ascending: false })
         .order('page_number', { ascending: true });
       
-      if (data) {
+      if (data && data.length > 0) {
         setEpaperPages(data.map(p => ({
           id: p.id,
           date: p.date,
@@ -201,6 +223,9 @@ const App: React.FC = () => {
           imageUrl: p.image_url,
           regions: p.regions || []
         })));
+      } else {
+        // Fallback to Mock
+        setEpaperPages(MOCK_EPAPER);
       }
       setLoading(false);
     };
@@ -210,6 +235,7 @@ const App: React.FC = () => {
   return (
     <AuthProvider>
       <HashRouter>
+        <AuthListener />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />

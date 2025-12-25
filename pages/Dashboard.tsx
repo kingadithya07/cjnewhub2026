@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../modules/auth/AuthContext';
 import { supabase } from '../services/supabaseClient';
@@ -14,7 +13,7 @@ import { getDeviceId } from '../utils/device';
 
 export const Dashboard: React.FC = () => {
   const { user, isDeviceApproved, isPrimaryDevice, refreshDeviceStatus } = useAuth();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   
   const activeTabParam = searchParams.get('tab') as 'ARTICLES' | 'COMMUNICATION' | 'SECURITY' | null;
   const activeTab = activeTabParam || 'ARTICLES';
