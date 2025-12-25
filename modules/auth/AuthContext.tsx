@@ -41,23 +41,70 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setConnectionStatus('online');
       return true;
     } catch (err: any) {
-      console.warn("Supabase connectivity probe failed. Project might be paused or domain blocked.");
+      console.warn("Supabase connectivity probe failed.");
       setConnectionStatus('offline');
       return false;
     }
   };
 
-  const fetchUserProfile = async (userId: string, email: string) => {
+  /**
+   * Reconcile Profile: Ensures a row exists in the public.profiles table.
+   * This handles cases where the Supabase trigger might have failed.
+   */
+  const reconcileProfile = async (userId: string, email: string, metadata: any) => {
     try {
-      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      if (data && !error) {
+      const { data: profile, error: fetchError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (fetchError && fetchError.code === 'PGRST116') {
+        // Profile doesn't exist, create it manually
+        const { data: newProfile, error: insertError } = await supabase
+          .from('profiles')
+          .insert({
+            id: userId,
+            name: metadata?.name || email.split('@')[0],
+            email: email,
+            role: metadata?.role || UserRole.READER
+          })
+          .select()
+          .single();
+        
+        if (newProfile) return newProfile;
+      }
+      return profile;
+    } catch (e) {
+      console.error("Reconciliation error", e);
+      return null;
+    }
+  };
+
+  const fetchUserProfile = async (userId: string, email: string, metadata?: any) => {
+    try {
+      const profile = await reconcileProfile(userId, email, metadata);
+      
+      if (profile) {
         setAuth({
-          user: { id: data.id, name: data.name, email: data.email, role: data.role as UserRole, avatar: data.avatar },
+          user: { 
+            id: profile.id, 
+            name: profile.name, 
+            email: profile.email, 
+            role: profile.role as UserRole, 
+            avatar: profile.avatar 
+          },
           isAuthenticated: true
         });
       } else {
+        // Fallback to metadata if table is unreachable
         setAuth({
-          user: { id: userId, name: email.split('@')[0], email: email, role: UserRole.READER },
+          user: { 
+            id: userId, 
+            name: metadata?.name || email.split('@')[0], 
+            email: email, 
+            role: metadata?.role || UserRole.READER 
+          },
           isAuthenticated: true
         });
       }
@@ -76,13 +123,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (isOnline) {
         try {
           const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) fetchUserProfile(session.user.id, session.user.email || '');
+          if (session?.user) {
+            fetchUserProfile(session.user.id, session.user.email || '', session.user.user_metadata);
+          }
         } catch (e) {
           console.error("Auth session check failed", e);
         }
       }
 
-      // Check for demo session (works offline)
       const isDemo = window.sessionStorage.getItem('demo_mode');
       const demoUser = window.sessionStorage.getItem('demo_user');
       if (isDemo && demoUser) {
@@ -94,7 +142,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
-        fetchUserProfile(session.user.id, session.user.email || '');
+        fetchUserProfile(session.user.id, session.user.email || '', session.user.user_metadata);
       } else {
         if (!window.sessionStorage.getItem('demo_mode')) {
           setAuth({ user: null, isAuthenticated: false });
@@ -114,28 +162,41 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const login = async (email: string, password?: string) => {
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password: password || '' });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password: password || '' });
       if (error) return { success: false, error: error.message };
+      
       window.sessionStorage.removeItem('demo_mode');
       window.sessionStorage.removeItem('demo_user');
+      
+      if (data.user) {
+        await fetchUserProfile(data.user.id, data.user.email || '', data.user.user_metadata);
+      }
+      
       return { success: true };
     } catch (e: any) {
       setConnectionStatus('offline');
       return { 
         success: false, 
-        error: "Connection failure: Could not reach Supabase. This usually means the database project is PAUSED." 
+        error: "Connection failure: Could not reach Supabase." 
       };
     }
   };
 
   const register = async (name: string, email: string, password: string, role: UserRole) => {
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email, 
         password,
         options: { data: { name, role } }
       });
+      
       if (error) return { success: false, error: error.message };
+      
+      // If user is immediately logged in (email confirmation off)
+      if (data.user && data.session) {
+        await fetchUserProfile(data.user.id, data.user.email || '', data.user.user_metadata);
+      }
+      
       return { success: true };
     } catch (e: any) {
       setConnectionStatus('offline');
@@ -152,7 +213,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Network error while reaching auth server." };
+      return { success: false, error: "Network error." };
     }
   };
 
@@ -162,7 +223,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Network error while updating password." };
+      return { success: false, error: "Network error." };
     }
   };
 
