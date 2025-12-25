@@ -22,43 +22,19 @@ import { MOCK_ARTICLES, MOCK_EPAPER } from './services/mockData';
 // Component to listen for global auth events (like Password Recovery redirect)
 const AuthListener = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   
   useEffect(() => {
     // Supabase Event Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // PASSWORD_RECOVERY event is fired when a user clicks a recovery link
       if (event === 'PASSWORD_RECOVERY') {
-        // When recovery event fires, explicitly move to the clean route
-        // This prevents the router from snapping back to home if the hash is cleared
-        navigate('/reset-password', { replace: true });
+        navigate('/reset-password');
       }
     });
     return () => subscription.unsubscribe();
-  }, [navigate, location]);
+  }, [navigate]);
 
   return null;
-};
-
-// Smart Catch-All Route to handle Supabase magic link hashes
-const CatchAllRoute = () => {
-  const [isRecovery, setIsRecovery] = useState(false);
-
-  useEffect(() => {
-    // Check raw window hash because Router might parse it as a path
-    const hash = window.location.hash;
-    // If we see access_token and type=recovery, it's a magic link
-    if (hash && (hash.includes('type=recovery') || hash.includes('access_token'))) {
-      setIsRecovery(true);
-    }
-  }, []);
-
-  if (isRecovery) {
-    // Render ResetPassword directly to keep the hash intact for Supabase to parse
-    return <ResetPassword />;
-  }
-  
-  // Default to Home if not a recovery link
-  return <Navigate to="/" replace />;
 };
 
 const ProtectedRoute = ({ children, roles }: { children?: React.ReactNode, roles?: UserRole[] }) => {
@@ -273,8 +249,7 @@ const App: React.FC = () => {
           <Route path="/epaper" element={<Layout><EPaperViewer pages={epaperPages} /></Layout>} />
           <Route path="/dashboard" element={<ProtectedRoute roles={[UserRole.ADMIN, UserRole.PUBLISHER, UserRole.EDITOR]}><Layout><Dashboard /></Layout></ProtectedRoute>} />
           
-           {/* Smart route for redirect handling */}
-           <Route path="*" element={<CatchAllRoute />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </HashRouter>
     </AuthProvider>

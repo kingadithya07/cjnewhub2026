@@ -1,9 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
-import { supabase } from '../services/supabaseClient';
-import { Lock, CheckCircle, AlertCircle, ShieldCheck, Loader2, RefreshCw } from 'lucide-react';
+import { Lock, CheckCircle, AlertCircle, ShieldCheck } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
   const navigate = useNavigate();
@@ -13,76 +12,6 @@ export const ResetPassword: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  
-  // State for the token exchange process
-  const [verifyingLink, setVerifyingLink] = useState(true);
-  const [sessionVerified, setSessionVerified] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-    let pollInterval: ReturnType<typeof setInterval>;
-
-    const checkHashPresence = () => {
-       const hash = window.location.hash;
-       return hash && (hash.includes('type=recovery') || hash.includes('access_token'));
-    };
-
-    // This function runs an aggressive check to find the session "instantly"
-    const aggressiveVerify = () => {
-      let attempts = 0;
-      pollInterval = setInterval(async () => {
-        if (!mounted) return;
-        
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session) {
-          clearInterval(pollInterval);
-          setSessionVerified(true);
-          setVerifyingLink(false);
-        } else {
-          attempts++;
-          const maxAttempts = checkHashPresence() ? 100 : 30; // 10s vs 3s
-          
-          if (attempts > maxAttempts) {
-            clearInterval(pollInterval);
-            if (mounted) {
-               setVerifyingLink((current) => {
-                 if (current) return false;
-                 return current;
-               });
-            }
-          }
-        }
-      }, 100);
-    };
-
-    // 1. Initial Check
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session && mounted) {
-        setSessionVerified(true);
-        setVerifyingLink(false);
-      } else {
-        aggressiveVerify();
-      }
-    });
-
-    // 2. Standard Event Listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
-        if (mounted) {
-          clearInterval(pollInterval);
-          setSessionVerified(true);
-          setVerifyingLink(false);
-        }
-      }
-    });
-
-    return () => { 
-        mounted = false; 
-        subscription.unsubscribe();
-        if (pollInterval) clearInterval(pollInterval);
-    };
-  }, []);
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,11 +22,14 @@ export const ResetPassword: React.FC = () => {
     setError('');
 
     try {
+      // We attempt to update the password using the session established by the email link
       const result = await updatePassword(password);
+      
       if (result.success) {
         navigate('/auth-success?type=password-reset-success');
       } else {
-        setError(result.error || 'Failed to update password. Session may have expired.');
+        // If this fails, it usually means the link expired or the session is invalid
+        setError('Unable to update password. The reset link may have expired. Please request a new one.');
       }
     } catch (err) {
       setError('An unexpected error occurred.');
@@ -106,55 +38,6 @@ export const ResetPassword: React.FC = () => {
     }
   };
 
-  const handleManualRetry = () => {
-    setVerifyingLink(true);
-    setSessionVerified(false);
-    window.location.reload();
-  };
-
-  if (verifyingLink) {
-     return (
-        <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-            <div className="bg-white p-8 rounded-2xl shadow-xl flex flex-col items-center max-w-sm w-full text-center animate-in fade-in zoom-in duration-300">
-                <Loader2 className="animate-spin text-[#b4a070] mb-4" size={48} />
-                <h2 className="text-xl font-bold text-gray-800">Verifying Link...</h2>
-                <p className="text-gray-500 text-sm mt-2">Please wait while we secure your connection.</p>
-            </div>
-        </div>
-     );
-  }
-
-  if (!sessionVerified) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden p-8 text-center animate-in fade-in duration-300">
-             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
-                <AlertCircle size={32} />
-             </div>
-             <h2 className="text-2xl font-bold text-gray-900 mb-2">Link Invalid or Expired</h2>
-             <p className="text-gray-500 mb-6 text-sm leading-relaxed">
-                We couldn't verify the reset token. The link may have expired or was already used.
-             </p>
-             
-             <button 
-                onClick={handleManualRetry}
-                className="w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-colors mb-3 flex items-center justify-center gap-2"
-             >
-                <RefreshCw size={16} /> Try Again
-             </button>
-
-             <Link 
-                to="/login"
-                className="inline-flex items-center justify-center w-full bg-[#111827] text-white font-bold py-4 rounded-xl hover:bg-black transition-colors shadow-lg"
-             >
-                Back to Login
-             </Link>
-          </div>
-        </div>
-      );
-  }
-
-  // Authenticated & Verified -> Show New Password Section
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
@@ -169,7 +52,7 @@ export const ResetPassword: React.FC = () => {
              Reset Password
            </h2>
            <p className="text-gray-400 text-sm tracking-widest uppercase font-bold">
-             Create Your New Password
+             Set Your New Credentials
            </p>
         </div>
 
@@ -180,12 +63,6 @@ export const ResetPassword: React.FC = () => {
               <p className="font-medium">{error}</p>
             </div>
           )}
-
-          <div className="mb-8 text-center">
-             <p className="text-green-600 bg-green-50 p-3 rounded-lg text-sm font-bold border border-green-100 inline-flex items-center gap-2">
-                <CheckCircle size={16} /> Identity Verified
-             </p>
-          </div>
 
           <form onSubmit={handleResetPassword} className="space-y-6">
             <div>
