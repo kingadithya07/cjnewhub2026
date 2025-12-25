@@ -13,30 +13,72 @@ export const ResetPassword: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [initializing, setInitializing] = useState(true);
+  const [validSession, setValidSession] = useState(false);
+  const [checking, setChecking] = useState(true);
 
   // Check session status on mount
   useEffect(() => {
     let mounted = true;
+
     const checkAuth = async () => {
-      // Small delay to allow Supabase to process the hash fragment from the email link
-      if (!isAuthenticated) {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (!session) {
-             // Wait a little longer if the client is still processing the URL hash
-             setTimeout(async () => {
-                 const { data: { session: retrySession } } = await supabase.auth.getSession();
-                 if (mounted) setInitializing(false);
-             }, 1500);
-             return;
-          }
+      // 1. If we are already fully authenticated via Context
+      if (isAuthenticated) {
+        if (mounted) {
+            setValidSession(true);
+            setChecking(false);
+        }
+        return;
       }
-      if (mounted) setInitializing(false);
+
+      // 2. Check directly with Supabase (race condition handling)
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          if (mounted) {
+            setValidSession(true);
+            setChecking(false);
+          }
+          return;
+        }
+
+        // 3. If hash exists, give Supabase a moment to process the recovery token
+        if (window.location.hash && (window.location.hash.includes('access_token') || window.location.hash.includes('type=recovery'))) {
+            // Wait for onAuthStateChange to fire in the background
+            setTimeout(async () => {
+                 const { data: { session: retrySession } } = await supabase.auth.getSession();
+                 if (mounted) {
+                    setValidSession(!!retrySession);
+                    setChecking(false);
+                 }
+            }, 2000); // 2 second grace period for token exchange
+        } else {
+            // No hash, no session -> Invalid
+            if (mounted) {
+                setValidSession(false);
+                setChecking(false);
+            }
+        }
+      } catch (e) {
+        if (mounted) setChecking(false);
+      }
     };
 
     checkAuth();
+    
+    // Also listen specifically here in case the global listener is slow
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
+             if (mounted) {
+                 setValidSession(true);
+                 setChecking(false);
+             }
+        }
+    });
 
-    return () => { mounted = false; };
+    return () => { 
+        mounted = false; 
+        subscription.unsubscribe();
+    };
   }, [isAuthenticated]);
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -48,10 +90,13 @@ export const ResetPassword: React.FC = () => {
     setError('');
 
     try {
-      // Optional: Prevent reuse of current password if user data is available
-      if (user?.email) {
+      // Get current user email from session if context is not yet updated
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      const targetEmail = user?.email || currentUser?.email;
+
+      if (targetEmail) {
         const { data: reuseCheckData } = await supabase.auth.signInWithPassword({
-            email: user.email,
+            email: targetEmail,
             password: password
         });
         if (reuseCheckData.user) {
@@ -74,18 +119,18 @@ export const ResetPassword: React.FC = () => {
     }
   };
 
-  if (initializing) {
+  if (checking) {
      return (
         <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
             <Loader2 className="animate-spin text-[#b4a070] mb-4" size={48} />
-            <h2 className="text-xl font-bold text-gray-800">Verifying Link...</h2>
-            <p className="text-gray-500 text-sm mt-2">Securing your session.</p>
+            <h2 className="text-xl font-bold text-gray-800">Verifying Secure Link...</h2>
+            <p className="text-gray-500 text-sm mt-2">Please wait while we validate your request.</p>
         </div>
      );
   }
 
-  // If we are done initializing and NOT authenticated, the link is invalid/expired.
-  if (!isAuthenticated) {
+  // If check completed and no valid session
+  if (!validSession) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden p-8 text-center animate-in fade-in duration-300">
@@ -94,13 +139,13 @@ export const ResetPassword: React.FC = () => {
              </div>
              <h2 className="text-2xl font-bold text-gray-900 mb-2">Invalid or Expired Link</h2>
              <p className="text-gray-500 mb-6">
-                This password reset link is invalid or has expired. Please request a new one.
+                This password reset link is invalid, has expired, or has already been used. Please request a new one.
              </p>
              <Link 
                 to="/login"
                 className="inline-flex items-center justify-center w-full bg-[#111827] text-white font-bold py-4 rounded-xl hover:bg-black transition-colors"
              >
-                Back to Login
+                Return to Login
              </Link>
           </div>
         </div>
@@ -138,7 +183,7 @@ export const ResetPassword: React.FC = () => {
              <p className="text-green-600 bg-green-50 p-3 rounded-lg text-sm font-bold border border-green-100 inline-flex items-center gap-2">
                 <CheckCircle size={16} /> Identity Verified
              </p>
-             <p className="text-gray-500 text-xs mt-3">Please set your new password for <strong>{user?.email}</strong>.</p>
+             <p className="text-gray-500 text-xs mt-3">Please set your new password below.</p>
           </div>
 
           <form onSubmit={handleResetPassword} className="space-y-6">

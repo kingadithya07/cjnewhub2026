@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { UserRole } from '../types';
-import { Newspaper, Lock, Mail, ArrowRight, ArrowLeft, KeyRound, Shield, AlertCircle } from 'lucide-react';
+import { Newspaper, Lock, Mail, ArrowRight, ArrowLeft, KeyRound, Shield, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -43,11 +43,11 @@ export const Login: React.FC = () => {
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
     const success = await forgotPassword(email);
     setLoading(false);
     if (success) {
-      // Redirect to the combined ResetPassword page
-      navigate(`/reset-password?email=${encodeURIComponent(email)}`);
+      setResetSent(true);
     } else {
       setError('Failed to send reset link. Please try again.');
     }
@@ -56,7 +56,7 @@ export const Login: React.FC = () => {
   if (isForgotPassword) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative">
-         <button onClick={() => setIsForgotPassword(false)} className="absolute top-6 left-6 flex items-center text-gray-500 hover:text-indigo-900 gap-2 font-medium z-10">
+         <button onClick={() => { setIsForgotPassword(false); setResetSent(false); setError(''); }} className="absolute top-6 left-6 flex items-center text-gray-500 hover:text-indigo-900 gap-2 font-medium z-10">
             <div className="bg-white p-2 rounded-full shadow-sm"><ArrowLeft size={20} /></div>
             <span className="hidden sm:inline">Back to Login</span>
          </button>
@@ -71,28 +71,52 @@ export const Login: React.FC = () => {
             </div>
             
             <div className="p-8">
-                <form onSubmit={handleForgotPassword} className="space-y-6">
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Email Address</label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
-                      <input
-                        type="email" required
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#b4a070] outline-none transition-all"
-                        placeholder="name@example.com"
-                      />
+                {resetSent ? (
+                  <div className="text-center space-y-4 animate-in fade-in duration-500">
+                    <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto">
+                      <CheckCircle2 size={32} />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-800">Check Your Inbox</h3>
+                    <p className="text-gray-500 text-sm leading-relaxed">
+                      We have sent a secure password recovery link to <strong>{email}</strong>. 
+                      Please click the link in that email to create a new password.
+                    </p>
+                    <div className="pt-4">
+                      <button onClick={() => { setIsForgotPassword(false); setResetSent(false); }} className="text-indigo-600 font-bold hover:underline">
+                        Return to Sign In
+                      </button>
                     </div>
                   </div>
-                  <button
-                    type="submit" disabled={loading}
-                    className="w-full bg-[#111827] hover:bg-black text-white font-bold py-4 rounded-xl transition-all shadow-xl active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {loading ? 'Sending Code...' : 'Send Recovery Code'}
-                    {!loading && <ArrowRight size={20} className="text-[#b4a070]" />}
-                  </button>
-                </form>
+                ) : (
+                  <form onSubmit={handleForgotPassword} className="space-y-6">
+                    {error && (
+                      <div className="bg-red-50 border border-red-100 text-red-600 p-3 rounded-lg text-sm flex items-start gap-2">
+                        <AlertCircle className="shrink-0 mt-0.5" size={16} /> 
+                        <p>{error}</p>
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Email Address</label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                        <input
+                          type="email" required
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#b4a070] outline-none transition-all"
+                          placeholder="name@example.com"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="submit" disabled={loading}
+                      className="w-full bg-[#111827] hover:bg-black text-white font-bold py-4 rounded-xl transition-all shadow-xl active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {loading ? 'Sending...' : 'Send Recovery Link'}
+                      {!loading && <ArrowRight size={20} className="text-[#b4a070]" />}
+                    </button>
+                  </form>
+                )}
             </div>
          </div>
       </div>
