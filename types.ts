@@ -60,6 +60,7 @@ export interface WatermarkSettings {
   showDate: boolean;
 }
 
+// Fixed missing exports for modules/services
 export interface Category {
   id: string;
   name: string;
@@ -126,26 +127,4 @@ export interface Mail {
   createdAt: string;
   isRead: boolean;
   attachments?: Attachment[];
-}
-
-// New Types for Security
-export interface TrustedDevice {
-  id: string;
-  profile_id: string;
-  device_id: string;
-  device_name: string;
-  is_primary: boolean;
-  status: 'APPROVED' | 'PENDING' | 'BLOCKED';
-  last_active: string;
-  created_at: string;
-}
-
-export interface SecurityRequest {
-  id: string;
-  profile_id: string;
-  request_type: 'DEVICE_ADD' | 'PROFILE_UPDATE' | 'PASSWORD_RESET';
-  details: any;
-  requested_from_device: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  created_at: string;
 }

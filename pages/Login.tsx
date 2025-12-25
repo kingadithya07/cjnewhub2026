@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { UserRole } from '../types';
-import { Newspaper, Lock, Mail, ArrowRight, ArrowLeft, KeyRound, Shield, AlertCircle, Smartphone } from 'lucide-react';
+import { Newspaper, Lock, Mail, ArrowRight, ArrowLeft, KeyRound, Shield, AlertCircle } from 'lucide-react';
 
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -12,9 +12,9 @@ export const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isForgotPassword, setIsForgotPassword] = useState(false);
-  const [devicePending, setDevicePending] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
-  const { login, forgotPassword } = useAuth();
+  const { login, forgotPassword, user } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -24,13 +24,8 @@ export const Login: React.FC = () => {
     
     try {
       const result = await login(email, password);
-      
       if (result.success) {
-        if (result.deviceStatus === 'PENDING') {
-            setDevicePending(true);
-        } else {
-            navigate('/');
-        }
+        navigate('/');
       } else {
         if (result.error?.includes('API key')) {
           setError('Invalid API Configuration. Please check your Supabase keys.');
@@ -51,43 +46,13 @@ export const Login: React.FC = () => {
     const success = await forgotPassword(email);
     setLoading(false);
     if (success) {
+      // Redirect to the combined ResetPassword page
       navigate(`/reset-password?email=${encodeURIComponent(email)}`);
     } else {
       setError('Failed to send reset link. Please try again.');
     }
   };
 
-  if (devicePending) {
-     return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-            <div className="bg-white max-w-md w-full rounded-2xl shadow-2xl p-8 text-center animate-in zoom-in duration-300">
-                <div className="w-16 h-16 bg-yellow-50 rounded-full flex items-center justify-center mx-auto mb-4 text-yellow-600">
-                    <Smartphone size={32} />
-                </div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Device Approval Needed</h2>
-                <p className="text-gray-500 mb-6">
-                    This is a new device. We have sent a security request to your <strong>Primary Device</strong>.
-                </p>
-                <div className="bg-gray-50 p-4 rounded-xl text-left text-sm mb-6 border border-gray-100">
-                    <p className="font-bold text-gray-800">Next Steps:</p>
-                    <ol className="list-decimal ml-4 mt-2 space-y-2 text-gray-600">
-                        <li>Open NewsFlow on your Primary Device.</li>
-                        <li>Go to Dashboard {'>'} Security.</li>
-                        <li>Approve login for this device.</li>
-                    </ol>
-                </div>
-                <button onClick={() => window.location.reload()} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700">
-                    I Have Approved It
-                </button>
-                <button onClick={() => setDevicePending(false)} className="mt-4 text-gray-400 text-sm font-bold hover:text-gray-600">
-                    Back to Login
-                </button>
-            </div>
-        </div>
-     );
-  }
-
-  // Forgot Password View (Same as before)
   if (isForgotPassword) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative">
@@ -134,7 +99,6 @@ export const Login: React.FC = () => {
     );
   }
 
-  // Standard Login View
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative">
       <Link to="/" className="absolute top-6 left-6 flex items-center text-gray-500 hover:text-indigo-900 transition-colors gap-2 font-medium z-10">
