@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { HashRouter, Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './modules/auth/AuthContext';
 import { Layout } from './components/Layout';
 import { ArticleList } from './modules/articles/ArticleList';
@@ -22,17 +22,21 @@ import { MOCK_ARTICLES, MOCK_EPAPER } from './services/mockData';
 // Component to listen for global auth events (like Password Recovery redirect)
 const AuthListener = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Supabase redirect with HashRouter often clobbers the route.
       if (event === 'PASSWORD_RECOVERY') {
-        // Supabase redirect with HashRouter often clobbers the route.
-        // We force navigation to the reset password page when this event fires.
-        navigate('/reset-password');
+        // Only navigate if we aren't already there to prevent re-mounting the component
+        // which kills the token exchange process.
+        if (!location.pathname.includes('reset-password')) {
+           navigate('/reset-password');
+        }
       }
     });
     return () => subscription.unsubscribe();
-  }, [navigate]);
+  }, [navigate, location]);
 
   return null;
 };
