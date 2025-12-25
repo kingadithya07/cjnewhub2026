@@ -1,8 +1,9 @@
+
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { UserRole } from '../types';
-import { Newspaper, User, Mail, ArrowRight, Lock, Shield, AlertCircle, ArrowLeft } from 'lucide-react';
+import { Newspaper, User, Mail, ArrowRight, Lock, Shield, AlertCircle, ArrowLeft, Loader2 } from 'lucide-react';
 
 export const Register: React.FC = () => {
   const [name, setName] = useState('');
@@ -11,6 +12,7 @@ export const Register: React.FC = () => {
   const [role, setRole] = useState<UserRole>(UserRole.READER);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
   
   const { register } = useAuth();
   const navigate = useNavigate();
@@ -23,22 +25,38 @@ export const Register: React.FC = () => {
     try {
       const result = await register(name, email, password, role);
       if (result.success) {
-        // For development/demo, we allow instant access. 
-        // In production, user might need to verify email.
-        navigate('/dashboard');
+        setSuccess(true);
+        // After 3 seconds, redirect to login
+        setTimeout(() => navigate('/login'), 3000);
       } else {
-        setError(result.error || 'Registration failed.');
+        setError(result.error || 'Registration failed. Please check your credentials.');
       }
-    } catch (err) {
-      setError('An unexpected error occurred. Please try a different email.');
+    } catch (err: any) {
+      setError(err.message || 'Network error. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  if (success) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-8 text-center animate-in fade-in zoom-in duration-300">
+          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 text-green-600">
+             <Shield className="animate-bounce" size={32} />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Registration Successful!</h2>
+          <p className="text-gray-500 mb-6">Your account has been created. Please check your email for a verification link.</p>
+          <div className="flex items-center justify-center gap-2 text-indigo-600 font-bold">
+             <Loader2 size={20} className="animate-spin" /> Redirecting to Login...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      {/* Back to Home */}
       <Link to="/" className="absolute top-6 left-6 flex items-center text-gray-500 hover:text-indigo-900 transition-colors gap-2 font-medium z-10">
         <ArrowLeft size={20} />
         <span className="hidden sm:inline">Home</span>
@@ -60,10 +78,7 @@ export const Register: React.FC = () => {
             {error && (
               <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-xl text-sm flex items-start gap-3 animate-in fade-in duration-200">
                 <AlertCircle className="shrink-0 mt-0.5" size={18} /> 
-                <div>
-                  <p className="font-bold">Registration Error</p>
-                  <p className="opacity-90">{error}</p>
-                </div>
+                <p className="font-medium">{error}</p>
               </div>
             )}
 
@@ -132,9 +147,9 @@ export const Register: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-[#111827] hover:bg-black text-white font-bold py-4 rounded-xl flex items-center justify-center space-x-2 transition-all shadow-xl active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-[#111827] hover:bg-black text-white font-bold py-4 rounded-xl flex items-center justify-center space-x-2 transition-all shadow-xl active:scale-95 disabled:opacity-50"
               >
-                <span>{loading ? 'Creating Account...' : 'Join NewsFlow Hub'}</span>
+                <span>{loading ? 'Creating Account...' : 'Join Hub'}</span>
                 {!loading && <ArrowRight size={20} className="text-[#b4a070]" />}
               </button>
             </div>
@@ -144,7 +159,7 @@ export const Register: React.FC = () => {
             <p className="text-sm text-gray-500">
               Already have an account?{' '}
               <Link to="/login" className="text-[#b4a070] font-black hover:underline tracking-tight">
-                SIGN IN NOW
+                SIGN IN
               </Link>
             </p>
           </div>

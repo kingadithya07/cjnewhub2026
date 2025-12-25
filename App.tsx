@@ -1,5 +1,6 @@
+
 import React, { useMemo, useState, useEffect } from 'react';
-import { HashRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './modules/auth/AuthContext';
 import { Layout } from './components/Layout';
 import { ArticleList } from './modules/articles/ArticleList';
@@ -8,10 +9,27 @@ import { EPaperViewer } from './modules/epaper/EPaperViewer';
 import { Dashboard } from './pages/Dashboard';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+import { ResetPassword } from './pages/ResetPassword';
+import { AuthAction } from './pages/AuthAction';
 import { HeroSlider } from './components/HeroSlider';
 import { supabase } from './services/supabaseClient';
 import { Article, UserRole, EPaperPage, Classified } from './types';
-import { Store, Newspaper, TrendingUp, MapPin, DollarSign } from 'lucide-react';
+import { Store, Newspaper, TrendingUp, MapPin, DollarSign, Loader2 } from 'lucide-react';
+import { MOCK_ARTICLES, MOCK_EPAPER } from './services/mockData';
+
+// Listener for Supabase Auth Events (like Password Reset links)
+const AuthListener = () => {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        navigate('/reset-password');
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [navigate]);
+  return null;
+};
 
 const ProtectedRoute = ({ children, roles }: { children?: React.ReactNode, roles?: UserRole[] }) => {
   const { user, isAuthenticated } = useAuth();
@@ -30,31 +48,45 @@ const Home: React.FC = () => {
   useEffect(() => {
     const loadHomeData = async () => {
       setLoading(true);
-      const { data: art } = await supabase
-        .from('articles')
-        .select('*')
-        .eq('status', 'PUBLISHED')
-        .order('created_at', { ascending: false });
-      
-      if (art) {
-        setArticles(art.map(a => ({
-          ...a,
-          createdAt: a.created_at,
-          authorName: a.author_name,
-          thumbnailUrl: a.thumbnail_url,
-          isFeatured: a.is_featured,
-          isTrending: a.is_trending
-        })));
-      }
+      try {
+        const { data: art } = await supabase
+          .from('articles')
+          .select('*')
+          .eq('status', 'PUBLISHED')
+          .order('created_at', { ascending: false });
+        
+        if (art && art.length > 0) {
+          setArticles(art.map(a => ({
+            id: a.id,
+            title: a.title,
+            summary: a.summary,
+            content: a.content,
+            authorId: a.author_id,
+            authorName: a.author_name,
+            authorAvatar: a.author_avatar,
+            status: a.status,
+            category: a.category,
+            thumbnailUrl: a.thumbnail_url,
+            isFeatured: a.is_featured,
+            isTrending: a.is_trending,
+            createdAt: a.created_at
+          })));
+        } else {
+          setArticles(MOCK_ARTICLES.filter(a => a.status === 'PUBLISHED'));
+        }
 
-      const { data: cls } = await supabase
-        .from('classifieds')
-        .select('*')
-        .eq('status', 'ACTIVE')
-        .order('created_at', { ascending: false });
-      
-      if (cls) setClassifieds(cls.map(c => ({ ...c, createdAt: c.created_at })));
-      setLoading(false);
+        const { data: cls } = await supabase
+          .from('classifieds')
+          .select('*')
+          .eq('status', 'ACTIVE')
+          .order('created_at', { ascending: false });
+        
+        if (cls) setClassifieds(cls.map(c => ({ ...c, createdAt: c.created_at })));
+      } catch (err) {
+        setArticles(MOCK_ARTICLES.filter(a => a.status === 'PUBLISHED'));
+      } finally {
+        setLoading(false);
+      }
     };
 
     loadHomeData();
@@ -66,7 +98,7 @@ const Home: React.FC = () => {
   const featuredArticles = useMemo(() => articles.filter(a => a.isFeatured).slice(0, 5), [articles]);
   const trendingArticles = useMemo(() => articles.filter(a => a.isTrending).slice(0, 5), [articles]);
 
-  if (loading) return <div className="py-20 text-center font-bold text-gray-400">Loading Latest News...</div>;
+  if (loading) return <div className="py-32 flex justify-center"><Loader2 className="animate-spin text-indigo-600" size={48} /></div>;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -102,7 +134,6 @@ const Home: React.FC = () => {
                        </div>
                     </div>
                  ))}
-                 {trendingArticles.length === 0 && <p className="text-xs text-gray-400 italic">No trending news currently.</p>}
               </div>
            </div>
         </div>
@@ -134,7 +165,6 @@ const Home: React.FC = () => {
                      </div>
                   </div>
                 ))}
-                {classifieds.length === 0 && <div className="col-span-2 text-center py-10 text-gray-400">No active classifieds.</div>}
              </div>
           )}
         </div>
@@ -150,18 +180,26 @@ const Home: React.FC = () => {
 
 const App: React.FC = () => {
   const [epaperPages, setEpaperPages] = useState<EPaperPage[]>([]);
+  
   useEffect(() => {
     supabase.from('epaper_pages').select('*').then(({ data }) => {
-      if (data) setEpaperPages(data.map(p => ({ ...p, pageNumber: p.page_number, imageUrl: p.image_url })));
+      if (data && data.length > 0) {
+        setEpaperPages(data.map(p => ({ ...p, pageNumber: p.page_number, imageUrl: p.image_url })));
+      } else {
+        setEpaperPages(MOCK_EPAPER);
+      }
     });
   }, []);
 
   return (
     <AuthProvider>
       <HashRouter>
+        <AuthListener />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/auth-success" element={<AuthAction />} />
           <Route path="/" element={<Layout><Home /></Layout>} />
           <Route path="/articles/:id" element={<Layout><ArticleDetail /></Layout>} />
           <Route path="/epaper" element={<Layout><EPaperViewer pages={epaperPages} /></Layout>} />
