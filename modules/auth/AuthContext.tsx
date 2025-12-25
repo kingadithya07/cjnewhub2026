@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User, UserRole, AuthState } from '../../types';
 import { supabase } from '../../services/supabaseClient';
@@ -82,16 +81,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         email,
         password,
         options: {
-            data: { name } // Passed to trigger
+            data: { 
+              name,
+              role // Pass role to Supabase metadata so trigger can see it
+            } 
         }
     });
 
     if (!error) {
-        // Note: The Trigger in db_schema.sql creates the profile. 
-        // However, for immediate update of Role (default is READER), we might need to manual update if allowed,
-        // or the user must be READER first. For this demo, we assume the trigger handles creation.
-        // If we want to enforce specific roles on signup (security risk if public), we would need a secure backend function.
-        // Here we just let them sign up.
         return true;
     }
     return false;
