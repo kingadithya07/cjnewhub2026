@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { supabase } from '../services/supabaseClient';
-import { Mail, Lock, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck, KeyRound, Newspaper, Loader2 } from 'lucide-react';
+import { Mail, Lock, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck, KeyRound, Newspaper, Loader2, RefreshCw } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -30,7 +30,6 @@ export const ResetPassword: React.FC = () => {
         setStep(2);
       }
       
-      // Also listen specifically for recovery events in case AuthContext is lagging or specific event fired
       const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'PASSWORD_RECOVERY' || (session && event === 'SIGNED_IN')) {
           setStep(2);
@@ -44,22 +43,19 @@ export const ResetPassword: React.FC = () => {
     checkSession();
   }, [isAuthenticated]);
 
-  // 2. Pre-fill OTP if present in URL (e.g. ?code=123456)
+  // 2. Pre-fill OTP if present in URL (The "Internal" Generation)
   useEffect(() => {
-    if (codeParam && codeParam.length === 6) {
-      setOtp(codeParam.split(''));
-      // Optional: Auto-trigger verification could go here if desired, 
-      // but usually safer to let user confirm.
+    if (codeParam) {
+      // If code is provided in link, auto-fill the boxes
+      // Truncate to 6 if it's longer just for display safety, though standard OTP is 6
+      const codeChars = codeParam.slice(0, 6).split('');
+      const newOtp = [...otp];
+      codeChars.forEach((char, i) => {
+        if (i < 6) newOtp[i] = char;
+      });
+      setOtp(newOtp);
     }
   }, [codeParam]);
-
-  useEffect(() => {
-    // If no email and not authenticated, we might be lost. 
-    // But if we have a hash (Magic Link), we wait for AuthContext.
-    if (!emailParam && !isAuthenticated && !window.location.hash && initialCheckDone) {
-        // console.warn("No email provided for password reset flow.");
-    }
-  }, [emailParam, isAuthenticated, initialCheckDone]);
 
   const handleOtpChange = (index: number, value: string) => {
     if (!/^\d*$/.test(value)) return;
@@ -94,7 +90,7 @@ export const ResetPassword: React.FC = () => {
       // Step 1: Verify the 6-digit PIN manually
       const result = await verifyOTP(emailParam, token, 'recovery');
       if (result.success) {
-        setStep(2); // Success! Move to password creation
+        setStep(2); 
       } else {
         setError(result.error || 'The code entered is invalid or has expired.');
       }
@@ -114,7 +110,26 @@ export const ResetPassword: React.FC = () => {
     setError('');
 
     try {
-      // Step 2: Update the password for the verified user
+      // --- PASSWORD HISTORY CHECK ---
+      // We attempt to sign in with the NEW password.
+      // If it SUCCEEDS, it means the password is the same as the old one.
+      // If it FAILS (Invalid login), it means the password is indeed new.
+      
+      // Note: This check only works if we have the email context.
+      if (emailParam) {
+        const { data: reuseCheckData, error: reuseCheckError } = await supabase.auth.signInWithPassword({
+            email: emailParam,
+            password: password
+        });
+
+        if (reuseCheckData.user) {
+            setLoading(false);
+            setError("You cannot use your previous password. Please choose a different one.");
+            return;
+        }
+      }
+
+      // If sign-in failed (good thing), we proceed to update.
       const result = await updatePassword(password);
       if (result.success) {
         navigate('/auth-success?type=password-reset-success');
@@ -152,7 +167,7 @@ export const ResetPassword: React.FC = () => {
              {step === 1 ? 'Verification' : 'Security Update'}
            </h2>
            <p className="text-gray-400 text-sm tracking-widest uppercase font-bold">
-             {step === 1 ? 'Enter Recovery Code' : 'Create New Password'}
+             {step === 1 ? 'Confirm Identity' : 'Create New Password'}
            </p>
         </div>
 
@@ -167,9 +182,9 @@ export const ResetPassword: React.FC = () => {
           {step === 1 ? (
             <div className="animate-in fade-in slide-in-from-left duration-300">
               <p className="text-gray-600 text-center mb-8 text-sm leading-relaxed">
-                A 6-digit recovery code was sent to <br/>
-                <span className="font-bold text-gray-900">{emailParam || 'your registered email'}</span>.
-                Please enter it below to proceed.
+                Verification code generated from secure link for <br/>
+                <span className="font-bold text-gray-900">{emailParam || 'your account'}</span>.
+                <br/><span className="text-xs text-indigo-600 font-bold mt-1 block">Code auto-filled from link.</span>
               </p>
 
               <form onSubmit={handleVerifyOtp} className="space-y-8">
@@ -181,10 +196,12 @@ export const ResetPassword: React.FC = () => {
                       type="text"
                       maxLength={1}
                       value={digit}
-                      autoFocus={index === 0}
+                      // Make it readOnly if auto-filled to emphasize "Internal Generation", 
+                      // but allow edit in case of manual entry fallback
+                      readOnly={!!codeParam} 
                       onChange={(e) => handleOtpChange(index, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                      className="w-11 h-14 md:w-12 md:h-16 text-center text-2xl font-black border-2 border-gray-100 rounded-xl focus:border-[#b4a070] focus:ring-4 focus:ring-[#b4a070]/10 outline-none transition-all shadow-sm"
+                      className={`w-11 h-14 md:w-12 md:h-16 text-center text-2xl font-black border-2 rounded-xl outline-none transition-all shadow-sm ${codeParam ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed' : 'bg-white text-black border-gray-100 focus:border-[#b4a070] focus:ring-4 focus:ring-[#b4a070]/10'}`}
                     />
                   ))}
                 </div>
@@ -200,11 +217,13 @@ export const ResetPassword: React.FC = () => {
                   </button>
                 </div>
                 
-                <div className="text-center pt-2">
-                  <Link to="/login" className="inline-flex items-center gap-2 text-xs font-black text-gray-400 hover:text-indigo-600 uppercase tracking-widest transition-colors">
-                    <ArrowLeft size={14} /> Back to Sign In
-                  </Link>
-                </div>
+                {!codeParam && (
+                    <div className="text-center pt-2">
+                    <Link to="/login" className="inline-flex items-center gap-2 text-xs font-black text-gray-400 hover:text-indigo-600 uppercase tracking-widest transition-colors">
+                        <ArrowLeft size={14} /> Back to Sign In
+                    </Link>
+                    </div>
+                )}
               </form>
             </div>
           ) : (
