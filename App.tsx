@@ -1,6 +1,5 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
-// Fix: Ensure standard v6 imports
 import { HashRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './modules/auth/AuthContext';
 import { Layout } from './components/Layout';
@@ -10,6 +9,8 @@ import { EPaperViewer } from './modules/epaper/EPaperViewer';
 import { Dashboard } from './pages/Dashboard';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+import { VerifyOTP } from './pages/VerifyOTP';
+import { AuthAction } from './pages/AuthAction';
 import { HeroSlider } from './components/HeroSlider';
 import { supabase } from './services/supabaseClient';
 import { Article, UserRole, EPaperPage, Classified } from './types';
@@ -210,6 +211,8 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/verify-otp" element={<VerifyOTP />} />
+          <Route path="/auth-success" element={<AuthAction />} />
           <Route path="/" element={<Layout><Home /></Layout>} />
           <Route path="/articles/:id" element={<Layout><ArticleDetail /></Layout>} />
           <Route path="/epaper" element={<Layout><EPaperViewer pages={epaperPages} /></Layout>} />

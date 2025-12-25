@@ -1,6 +1,5 @@
 
 import React, { useState } from 'react';
-// Fix: Ensure standard v6 imports
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { UserRole } from '../types';
@@ -25,9 +24,8 @@ export const Register: React.FC = () => {
     try {
       const result = await register(name, email, password, role);
       if (result.success) {
-        // For development/demo, we allow instant access. 
-        // In production, user might need to verify email.
-        navigate('/dashboard');
+        // Redirect to OTP verification page
+        navigate(`/verify-otp?email=${encodeURIComponent(email)}&type=signup`);
       } else {
         setError(result.error || 'Registration failed.');
       }
@@ -40,7 +38,6 @@ export const Register: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      {/* Back to Home */}
       <Link to="/" className="absolute top-6 left-6 flex items-center text-gray-500 hover:text-indigo-900 transition-colors gap-2 font-medium z-10">
         <ArrowLeft size={20} />
         <span className="hidden sm:inline">Home</span>

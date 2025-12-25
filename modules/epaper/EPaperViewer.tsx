@@ -50,10 +50,16 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
   const cropperRef = useRef<ReactCropperElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
 
-  // Fix: Handle dragMode change via instance method to avoid TS prop errors
+  // Fix: In Cropper v2, dragMode is handled via property or state update rather than setDragMode method. Bypass type mismatch.
   useEffect(() => {
     if (cropperRef.current?.cropper) {
-      cropperRef.current.cropper.setDragMode(cropperDragMode);
+      const cropperInstance = cropperRef.current.cropper as any;
+      if (typeof cropperInstance.setDragMode === 'function') {
+        cropperInstance.setDragMode(cropperDragMode);
+      } else {
+        // Fallback for v2 property-based drag mode
+        cropperInstance.dragMode = cropperDragMode;
+      }
     }
   }, [cropperDragMode]);
 
@@ -146,9 +152,13 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
   };
 
   const handleManualCrop = async () => {
-    const cropper = cropperRef.current?.cropper;
+    const cropper = cropperRef.current?.cropper as any;
     if (cropper) {
-      const canvas = cropper.getCroppedCanvas({ imageSmoothingQuality: 'high' });
+      // Fix: Use getCropperCanvas for Cropper.js v2 compatibility, fall back to getCroppedCanvas for v1.
+      const canvas = typeof cropper.getCropperCanvas === 'function' 
+        ? cropper.getCropperCanvas() 
+        : cropper.getCroppedCanvas({ imageSmoothingQuality: 'high' });
+        
       if (!canvas) return;
       
       const tempImg = new Image();
@@ -269,16 +279,19 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
             <button onClick={handleManualCrop} className="bg-white text-black px-6 py-2 rounded-full font-bold shadow-xl active:scale-95 transition-transform">WATERMARK CLIP</button>
           </div>
           <div className="flex-1 overflow-hidden bg-black/50">
+            {/* Fix: Bypass property mismatch for v2 by using a spread with any cast for options that are missing in types in this environment. */}
             <Cropper
                src={activePage.imageUrl}
                style={{ height: '100%', width: '100%' }}
                ref={cropperRef}
-               viewMode={1}
-               guides={true}
-               responsive={true}
-               checkOrientation={false}
+               {...({
+                 viewMode: 1,
+                 guides: true,
+                 responsive: true,
+                 checkOrientation: false,
+                 background: false
+               } as any)}
                crossOrigin="anonymous"
-               background={false}
             />
           </div>
         </div>

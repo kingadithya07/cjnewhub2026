@@ -72,14 +72,15 @@ export const Dashboard: React.FC = () => {
     e.preventDefault();
     if (!user) return;
     
+    // Fix: Access isFeatured and isTrending from newArticleData state correctly to avoid undefined assignment.
     const articlePayload = {
       title: newArticleData.title,
       summary: newArticleData.summary,
       content: newArticleData.content,
       category: newArticleData.category,
       thumbnail_url: newArticleData.thumbnailUrl,
-      is_featured: newArticleData.is_featured,
-      is_trending: newArticleData.is_trending,
+      is_featured: newArticleData.isFeatured,
+      is_trending: newArticleData.isTrending,
       author_id: user.id,
       author_name: user.name,
       author_avatar: user.avatar,
