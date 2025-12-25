@@ -9,6 +9,7 @@ interface AuthContextType extends AuthState {
   logout: () => void;
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
   forgotPassword: (email: string) => Promise<boolean>;
+  updatePassword: (newPassword: string) => Promise<{success: boolean, error?: string}>;
   verifyOTP: (email: string, token: string, type: 'signup' | 'recovery') => Promise<{success: boolean, error?: string}>;
   isDeviceApproved: boolean;
   refreshDeviceStatus: () => Promise<void>;
@@ -22,6 +23,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isAuthenticated: false,
   });
   const [isDeviceApproved, setIsDeviceApproved] = useState(false);
+
+  // Helper to get the correct redirect URL based on current environment
+  const getRedirectUrl = () => {
+    // For HashRouter, we need to preserve the hash structure if necessary, 
+    // but usually Supabase appends params to the end of the URL.
+    return window.location.origin;
+  };
 
   const checkDeviceTrust = async (userId: string) => {
     const currentDeviceId = getDeviceId();
@@ -96,9 +104,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (session?.user) fetchUserProfile(session.user.id);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) fetchUserProfile(session.user.id);
-      else { setAuth({ user: null, isAuthenticated: false }); setIsDeviceApproved(false); }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        fetchUserProfile(session.user.id);
+      } else {
+        setAuth({ user: null, isAuthenticated: false });
+        setIsDeviceApproved(false);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -118,7 +130,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const register = async (name: string, email: string, password: string, role: UserRole) => {
     const { data, error } = await supabase.auth.signUp({
-      email, password, options: { data: { name, role } }
+      email, 
+      password, 
+      options: { 
+        data: { name, role },
+        emailRedirectTo: getRedirectUrl()
+      }
     });
     if (error) return { success: false, error: error.message };
     return { success: true };
@@ -145,12 +162,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const forgotPassword = async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    // Explicitly set the redirect URL to current origin to avoid localhost:3000 default
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${getRedirectUrl()}/#/update-password`,
+    });
     return !error;
   };
 
+  const updatePassword = async (newPassword: string) => {
+    const { data, error } = await supabase.auth.updateUser({
+      password: newPassword
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  };
+
   return (
-    <AuthContext.Provider value={{ ...auth, isDeviceApproved, login, logout, register, forgotPassword, refreshDeviceStatus, verifyOTP }}>
+    <AuthContext.Provider value={{ ...auth, isDeviceApproved, login, logout, register, forgotPassword, updatePassword, refreshDeviceStatus, verifyOTP }}>
       {children}
     </AuthContext.Provider>
   );
