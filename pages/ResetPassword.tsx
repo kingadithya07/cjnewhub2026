@@ -1,118 +1,43 @@
 
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { supabase } from '../services/supabaseClient';
-import { Mail, Lock, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck, KeyRound, Newspaper, Loader2, RefreshCw } from 'lucide-react';
+import { Lock, CheckCircle, AlertCircle, ShieldCheck, Loader2, ArrowLeft } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { verifyOTP, updatePassword, isAuthenticated, user } = useAuth();
+  const { updatePassword, isAuthenticated, user } = useAuth();
 
-  // Extract email/code from URL
-  const emailParam = searchParams.get('email') || '';
-  const codeParam = searchParams.get('code') || searchParams.get('token');
-  
-  const [step, setStep] = useState<1 | 2>(1);
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [initialCheckDone, setInitialCheckDone] = useState(false);
   const [error, setError] = useState('');
+  const [initializing, setInitializing] = useState(true);
 
-  // 1. Check for existing session or Magic Link recovery
+  // Check session status on mount
   useEffect(() => {
-    const checkSession = async () => {
-      // If we are already authenticated (e.g. Magic Link clicked and processed), 
-      // we can theoretically move to step 2.
-      // However, to satisfy the UX requirement "enter code", we pre-fill if authenticated.
-      if (isAuthenticated) {
-        // If authenticated via link, we might not have the OTP code in params if hash clobbered it.
-        // We set a placeholder to allow the UI to function.
-        setOtp(['*', '*', '*', '*', '*', '*']); 
+    let mounted = true;
+    const checkAuth = async () => {
+      // Small delay to allow Supabase to process the hash fragment from the email link
+      if (!isAuthenticated) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) {
+             // Wait a little longer if the client is still processing the URL hash
+             setTimeout(async () => {
+                 const { data: { session: retrySession } } = await supabase.auth.getSession();
+                 if (mounted) setInitializing(false);
+             }, 1500);
+             return;
+          }
       }
-      
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-        if (event === 'PASSWORD_RECOVERY' || (session && event === 'SIGNED_IN')) {
-           // We do not force step 2 here immediately to allow the user to see Step 1 and click "Verify" 
-           // if they wish, but we ensure the OTP boxes are filled visually.
-           setOtp(['*', '*', '*', '*', '*', '*']);
-        }
-      });
-      
-      setInitialCheckDone(true);
-      return () => subscription.unsubscribe();
+      if (mounted) setInitializing(false);
     };
 
-    checkSession();
+    checkAuth();
+
+    return () => { mounted = false; };
   }, [isAuthenticated]);
-
-  // 2. Pre-fill OTP if present in URL (The "Internal" Generation)
-  useEffect(() => {
-    if (codeParam) {
-      // If code is provided in link, auto-fill the boxes
-      const codeChars = codeParam.slice(0, 6).split('');
-      const newOtp = [...otp];
-      codeChars.forEach((char, i) => {
-        if (i < 6) newOtp[i] = char;
-      });
-      setOtp(newOtp);
-    }
-  }, [codeParam]);
-
-  const handleOtpChange = (index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return;
-    const newOtp = [...otp];
-    newOtp[index] = value.slice(-1);
-    setOtp(newOtp);
-
-    // Auto-focus next input
-    if (value && index < 5) {
-      const nextInput = document.getElementById(`reset-otp-${index + 1}`);
-      nextInput?.focus();
-    }
-  };
-
-  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !otp[index] && index > 0) {
-      const prevInput = document.getElementById(`reset-otp-${index - 1}`);
-      prevInput?.focus();
-    }
-  };
-
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // 1. If we are ALREADY authenticated (Magic Link), we bypass the code check
-    // because the link itself was the verification.
-    if (isAuthenticated) {
-        setStep(2);
-        return;
-    }
-
-    // 2. Otherwise, we try to verify manually using the code
-    const token = otp.join('');
-    if (token.length < 6) return setError('Please enter the full 6-digit code.');
-    if (!emailParam) return setError('Email context missing. Please request a new code.');
-
-    setLoading(true);
-    setError('');
-    
-    try {
-      const result = await verifyOTP(emailParam, token, 'recovery');
-      if (result.success) {
-        setStep(2); 
-      } else {
-        setError(result.error || 'The code entered is invalid or has expired.');
-      }
-    } catch (err) {
-      setError('Verification failed. Please check your connection and try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,33 +48,24 @@ export const ResetPassword: React.FC = () => {
     setError('');
 
     try {
-      // --- PASSWORD HISTORY CHECK ---
-      // Use the email from params OR the authenticated user's email
-      const effectiveEmail = emailParam || user?.email;
-
-      if (effectiveEmail) {
+      // Optional: Prevent reuse of current password if user data is available
+      if (user?.email) {
         const { data: reuseCheckData } = await supabase.auth.signInWithPassword({
-            email: effectiveEmail,
+            email: user.email,
             password: password
         });
-
-        // If we successfully signed in, it means the NEW password matches the OLD one.
         if (reuseCheckData.user) {
             setLoading(false);
             setError("You cannot use your previous password. Please choose a different one.");
-            // We should sign out immediately because we just signed in with the old password to check it
-            // but we want to stay in the recovery session if possible. 
-            // However, Supabase session handling might require us to rely on the update call now.
             return;
         }
       }
 
-      // If sign-in failed (good thing), we proceed to update.
       const result = await updatePassword(password);
       if (result.success) {
         navigate('/auth-success?type=password-reset-success');
       } else {
-        setError(result.error || 'Failed to update password. Your session may have timed out.');
+        setError(result.error || 'Failed to update password. Session may have expired.');
       }
     } catch (err) {
       setError('An unexpected error occurred during password update.');
@@ -158,31 +74,55 @@ export const ResetPassword: React.FC = () => {
     }
   };
 
-  // If processing magic link hash, show loader briefly
-  if (!initialCheckDone && window.location.hash.includes('access_token')) {
+  if (initializing) {
      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-            <Loader2 className="animate-spin text-[#b4a070]" size={48} />
+        <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+            <Loader2 className="animate-spin text-[#b4a070] mb-4" size={48} />
+            <h2 className="text-xl font-bold text-gray-800">Verifying Link...</h2>
+            <p className="text-gray-500 text-sm mt-2">Securing your session.</p>
         </div>
      );
   }
 
+  // If we are done initializing and NOT authenticated, the link is invalid/expired.
+  if (!isAuthenticated) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden p-8 text-center animate-in fade-in duration-300">
+             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
+                <AlertCircle size={32} />
+             </div>
+             <h2 className="text-2xl font-bold text-gray-900 mb-2">Invalid or Expired Link</h2>
+             <p className="text-gray-500 mb-6">
+                This password reset link is invalid or has expired. Please request a new one.
+             </p>
+             <Link 
+                to="/login"
+                className="inline-flex items-center justify-center w-full bg-[#111827] text-white font-bold py-4 rounded-xl hover:bg-black transition-colors"
+             >
+                Back to Login
+             </Link>
+          </div>
+        </div>
+      );
+  }
+
+  // Authenticated: Show Reset Form
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
         
-        {/* Newspaper Header Styling */}
         <div className="bg-[#111827] p-8 text-center border-b-4 border-[#b4a070]">
            <div className="flex justify-center mb-6">
               <div className="bg-[#b4a070] text-black p-3 rounded-full shadow-lg">
-                {step === 1 ? <KeyRound size={28} /> : <ShieldCheck size={28} />}
+                <ShieldCheck size={28} />
               </div>
            </div>
            <h2 className="text-3xl font-black text-white mb-2" style={{ fontFamily: '"Playfair Display", serif' }}>
-             {step === 1 ? 'Verification' : 'Security Update'}
+             Security Update
            </h2>
            <p className="text-gray-400 text-sm tracking-widest uppercase font-bold">
-             {step === 1 ? 'Confirm Identity' : 'Create New Password'}
+             Create New Password
            </p>
         </div>
 
@@ -194,101 +134,59 @@ export const ResetPassword: React.FC = () => {
             </div>
           )}
 
-          {step === 1 ? (
-            <div className="animate-in fade-in slide-in-from-left duration-300">
-              <p className="text-gray-600 text-center mb-8 text-sm leading-relaxed">
-                Verification code generated from secure link for <br/>
-                <span className="font-bold text-gray-900">{emailParam || user?.email || 'your account'}</span>.
-                <br/><span className="text-xs text-indigo-600 font-bold mt-1 block">Code auto-filled from link.</span>
-              </p>
+          <div className="mb-8 text-center">
+             <p className="text-green-600 bg-green-50 p-3 rounded-lg text-sm font-bold border border-green-100 inline-flex items-center gap-2">
+                <CheckCircle size={16} /> Identity Verified
+             </p>
+             <p className="text-gray-500 text-xs mt-3">Please set your new password for <strong>{user?.email}</strong>.</p>
+          </div>
 
-              <form onSubmit={handleVerifyOtp} className="space-y-8">
-                <div className="flex justify-between gap-2 px-2">
-                  {otp.map((digit, index) => (
-                    <input
-                      key={index}
-                      id={`reset-otp-${index}`}
-                      type="text"
-                      maxLength={1}
-                      value={digit}
-                      // Make it readOnly if auto-filled (authenticated or param)
-                      readOnly={isAuthenticated || !!codeParam} 
-                      onChange={(e) => handleOtpChange(index, e.target.value)}
-                      onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                      className={`w-11 h-14 md:w-12 md:h-16 text-center text-2xl font-black border-2 rounded-xl outline-none transition-all shadow-sm ${isAuthenticated || codeParam ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed' : 'bg-white text-black border-gray-100 focus:border-[#b4a070] focus:ring-4 focus:ring-[#b4a070]/10'}`}
-                    />
-                  ))}
-                </div>
-
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    // Enable button if OTP is filled OR if we are authenticated (phantom code)
-                    disabled={loading || (!isAuthenticated && otp.some(d => !d))}
-                    className="w-full bg-[#111827] hover:bg-black text-white font-bold py-5 rounded-2xl flex items-center justify-center space-x-3 transition-all shadow-xl active:scale-95 disabled:opacity-50 disabled:grayscale"
-                  >
-                    <span className="text-lg">{loading ? 'Verifying...' : 'Verify Code'}</span>
-                    {!loading && <ArrowRight size={22} className="text-[#b4a070]" />}
-                  </button>
-                </div>
-                
-                {!codeParam && !isAuthenticated && (
-                    <div className="text-center pt-2">
-                    <Link to="/login" className="inline-flex items-center gap-2 text-xs font-black text-gray-400 hover:text-indigo-600 uppercase tracking-widest transition-colors">
-                        <ArrowLeft size={14} /> Back to Sign In
-                    </Link>
-                    </div>
-                )}
-              </form>
+          <form onSubmit={handleResetPassword} className="space-y-6">
+            <div>
+              <label className="block text-xs font-black text-gray-500 uppercase tracking-[0.2em] mb-2">New Password</label>
+              <div className="relative group">
+                <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-[#b4a070] transition-colors" size={20} />
+                <input
+                  type="password" required minLength={6} autoFocus
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-12 pr-4 py-4 border-2 border-gray-50 rounded-2xl focus:ring-4 focus:ring-[#b4a070]/10 focus:border-[#b4a070] outline-none transition-all text-gray-900 font-medium"
+                  placeholder="••••••••"
+                />
+              </div>
             </div>
-          ) : (
-            <div className="animate-in fade-in slide-in-from-right duration-500">
-               <div className="mb-8 text-center">
-                  <p className="text-gray-600 text-sm">Identity verified. Please set your new password below.</p>
-               </div>
 
-               <form onSubmit={handleResetPassword} className="space-y-6">
-                <div>
-                  <label className="block text-xs font-black text-gray-500 uppercase tracking-[0.2em] mb-2">New Password</label>
-                  <div className="relative group">
-                    <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-[#b4a070] transition-colors" size={20} />
-                    <input
-                      type="password" required minLength={6} autoFocus
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-12 pr-4 py-4 border-2 border-gray-50 rounded-2xl focus:ring-4 focus:ring-[#b4a070]/10 focus:border-[#b4a070] outline-none transition-all text-gray-900 font-medium"
-                      placeholder="••••••••"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-black text-gray-500 uppercase tracking-[0.2em] mb-2">Confirm New Password</label>
-                  <div className="relative group">
-                    <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-[#b4a070] transition-colors" size={20} />
-                    <input
-                      type="password" required minLength={6}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full pl-12 pr-4 py-4 border-2 border-gray-50 rounded-2xl focus:ring-4 focus:ring-[#b4a070]/10 focus:border-[#b4a070] outline-none transition-all text-gray-900 font-medium"
-                      placeholder="••••••••"
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-4">
-                  <button
-                    type="submit"
-                    disabled={loading || !password || password !== confirmPassword}
-                    className="w-full bg-[#111827] hover:bg-black text-white font-bold py-5 rounded-2xl flex items-center justify-center space-x-3 transition-all shadow-xl active:scale-95 disabled:opacity-50"
-                  >
-                    <span className="text-lg">{loading ? 'Updating...' : 'Set New Password'}</span>
-                    {!loading && <CheckCircle2 size={22} className="text-[#b4a070]" />}
-                  </button>
-                </div>
-              </form>
+            <div>
+              <label className="block text-xs font-black text-gray-500 uppercase tracking-[0.2em] mb-2">Confirm New Password</label>
+              <div className="relative group">
+                <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-[#b4a070] transition-colors" size={20} />
+                <input
+                  type="password" required minLength={6}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full pl-12 pr-4 py-4 border-2 border-gray-50 rounded-2xl focus:ring-4 focus:ring-[#b4a070]/10 focus:border-[#b4a070] outline-none transition-all text-gray-900 font-medium"
+                  placeholder="••••••••"
+                />
+              </div>
             </div>
-          )}
+
+            <div className="pt-4">
+              <button
+                type="submit"
+                disabled={loading || !password || password !== confirmPassword}
+                className="w-full bg-[#111827] hover:bg-black text-white font-bold py-5 rounded-2xl flex items-center justify-center space-x-3 transition-all shadow-xl active:scale-95 disabled:opacity-50"
+              >
+                <span className="text-lg">{loading ? 'Updating...' : 'Set New Password'}</span>
+                {!loading && <CheckCircle size={22} className="text-[#b4a070]" />}
+              </button>
+            </div>
+            
+            <div className="text-center pt-2">
+                <Link to="/login" className="inline-flex items-center gap-2 text-xs font-black text-gray-400 hover:text-indigo-600 uppercase tracking-widest transition-colors">
+                    <ArrowLeft size={14} /> Back to Sign In
+                </Link>
+            </div>
+          </form>
         </div>
 
         <div className="p-6 bg-gray-50 text-center">
