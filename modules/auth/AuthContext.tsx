@@ -25,6 +25,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isDeviceApproved, setIsDeviceApproved] = useState(false);
 
   const getRedirectUrl = () => {
+    // When dealing with hash routers and Supabase magic links, simpler is often better.
+    // Redirecting to the origin ensures the hash is attached to the root, which the Supabase client can parse easily.
+    // The App's AuthListener will then handle the routing to /reset-password.
     return window.location.origin;
   };
 
@@ -159,9 +162,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const forgotPassword = async (email: string) => {
-    // Redirect explicitly to the ResetPassword page so the user sees the OTP entry screen
+    // We send them to the root URL. Supabase will append #access_token=...
+    // The App.tsx AuthListener will detect the PASSWORD_RECOVERY event and redirect to /reset-password.
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${getRedirectUrl()}/#/reset-password?email=${encodeURIComponent(email)}`,
+      redirectTo: getRedirectUrl(),
     });
     return !error;
   };

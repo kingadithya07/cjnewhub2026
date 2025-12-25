@@ -3,11 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { supabase } from '../services/supabaseClient';
-import { Lock, CheckCircle, AlertCircle, ShieldCheck, Loader2, ArrowLeft, RefreshCw, Smartphone } from 'lucide-react';
+import { Lock, CheckCircle, AlertCircle, ShieldCheck, Loader2, ArrowLeft, Smartphone } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
   const navigate = useNavigate();
-  const { updatePassword, isAuthenticated } = useAuth();
+  const { updatePassword } = useAuth();
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -20,59 +20,51 @@ export const ResetPassword: React.FC = () => {
 
   useEffect(() => {
     let mounted = true;
-    
-    // 1. If we are already authenticated via context (e.g. came from settings), we are good.
-    if (isAuthenticated) {
-      setVerifyingLink(false);
-      setSessionVerified(true);
-      return;
-    }
 
-    // 2. Set up a listener for the Password Recovery event specifically
-    // This event fires when Supabase successfully processes the token in the URL hash
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return;
+    const initializeReset = async () => {
+      // 1. Check if we already have a valid session (e.g., coming from email link)
+      const { data: { session } } = await supabase.auth.getSession();
       
-      console.log("Auth Event:", event);
+      if (session) {
+        if (mounted) {
+          setSessionVerified(true);
+          setVerifyingLink(false);
+        }
+        return;
+      }
 
+      // 2. If no session, check if we have the tokens in the URL to exchange
+      // Supabase handles the exchange automatically, we just need to wait for the event.
+      const hash = window.location.hash;
+      const hasToken = hash.includes('access_token') || hash.includes('type=recovery');
+
+      if (!hasToken) {
+        // No session and no token in URL -> Invalid Link immediately
+        if (mounted) {
+          setVerifyingLink(false);
+          setSessionVerified(false);
+        }
+      }
+      // If hasToken is true, we stay in verifiedLink=true and wait for onAuthStateChange
+    };
+
+    // Listen for the magic link handshake
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
-        setSessionVerified(true);
-        setVerifyingLink(false);
+        if (mounted) {
+          setSessionVerified(true);
+          setVerifyingLink(false);
+        }
       }
     });
 
-    // 3. Fallback Check: Sometimes the event fires before component mounts. 
-    // Check if we have a session or if the URL has the token hash.
-    const checkCurrentSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session && mounted) {
-        setSessionVerified(true);
-        setVerifyingLink(false);
-      }
-    };
-
-    // 4. Safety Timeout: If after 10 seconds we still haven't gotten an event
-    // and don't have a session, we consider the link failed/expired.
-    const timeoutId = setTimeout(() => {
-      if (mounted && !sessionVerified) {
-         // Final check before declaring death
-         supabase.auth.getSession().then(({ data: { session } }) => {
-            if (!session && mounted) {
-               setVerifyingLink(false);
-               // If we failed, sessionVerified remains false
-            }
-         });
-      }
-    }, 10000); // 10 second grace period for mobile/slow connections
-
-    checkCurrentSession();
+    initializeReset();
 
     return () => { 
         mounted = false; 
         subscription.unsubscribe();
-        clearTimeout(timeoutId);
     };
-  }, [isAuthenticated, sessionVerified]); // Depend on sessionVerified to avoid re-triggering timeout logic if already verified
+  }, []);
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,28 +75,14 @@ export const ResetPassword: React.FC = () => {
     setError('');
 
     try {
-      // Basic check to see if user is just typing their old password
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user && user.email) {
-          const { data: signInData } = await supabase.auth.signInWithPassword({
-            email: user.email,
-            password: password
-          });
-          if (signInData.session) {
-             setLoading(false);
-             setError("You cannot reuse your old password. Please enter a new one.");
-             return;
-          }
-      }
-
       const result = await updatePassword(password);
       if (result.success) {
         navigate('/auth-success?type=password-reset-success');
       } else {
-        setError(result.error || 'Failed to update password. Your session may have timed out.');
+        setError(result.error || 'Failed to update password. Please try requesting a new link.');
       }
     } catch (err) {
-      setError('An unexpected error occurred during password update.');
+      setError('An unexpected error occurred.');
     } finally {
       setLoading(false);
     }
@@ -113,13 +91,10 @@ export const ResetPassword: React.FC = () => {
   if (verifyingLink) {
      return (
         <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-            <div className="bg-white p-8 rounded-2xl shadow-xl flex flex-col items-center max-w-sm w-full text-center">
+            <div className="bg-white p-8 rounded-2xl shadow-xl flex flex-col items-center max-w-sm w-full text-center animate-in fade-in zoom-in duration-300">
                 <Loader2 className="animate-spin text-[#b4a070] mb-4" size={48} />
-                <h2 className="text-xl font-bold text-gray-800">Verifying Link...</h2>
-                <p className="text-gray-500 text-sm mt-2 mb-4">Establishing secure connection.</p>
-                <div className="text-xs text-gray-400 bg-gray-50 p-2 rounded border border-gray-100 w-full">
-                   Tip: Don't close this window while we sync your credentials.
-                </div>
+                <h2 className="text-xl font-bold text-gray-800">Securing Connection...</h2>
+                <p className="text-gray-500 text-sm mt-2">Validating your recovery token.</p>
             </div>
         </div>
      );
@@ -134,25 +109,25 @@ export const ResetPassword: React.FC = () => {
                 <AlertCircle size={32} />
              </div>
              <h2 className="text-2xl font-bold text-gray-900 mb-2">Link Expired or Invalid</h2>
-             <p className="text-gray-500 mb-6 text-sm">
-                We couldn't verify your secure session. This happens if the link is old, already used, or opened in a different browser.
+             <p className="text-gray-500 mb-6 text-sm leading-relaxed">
+                We couldn't verify your secure session. This link may have already been used or expired.
              </p>
-             <div className="space-y-3">
-                 <Link 
-                    to="/login"
-                    className="inline-flex items-center justify-center w-full bg-[#111827] text-white font-bold py-4 rounded-xl hover:bg-black transition-colors"
-                 >
-                    Request New Link
-                 </Link>
-                 
-                 {/* Hash detection help for user */}
-                 {window.location.hash.includes('access_token') && (
-                     <div className="p-3 bg-yellow-50 text-yellow-800 text-xs rounded-lg text-left mt-4 border border-yellow-100">
-                        <p className="font-bold flex items-center gap-1 mb-1"><Smartphone size={12}/> Troubleshooting:</p>
-                        It looks like you have a token. Try refreshing the page once. If that fails, please request a new link and open it in this same browser.
-                     </div>
-                 )}
+             
+             <div className="bg-gray-50 p-4 rounded-xl text-left text-xs text-gray-600 mb-6 border border-gray-100">
+                <p className="font-bold mb-1 flex items-center gap-1"><Smartphone size={12}/> troubleshooting:</p>
+                <ul className="list-disc pl-4 space-y-1">
+                   <li>Open the link in the <strong>same browser</strong> where you requested it.</li>
+                   <li>Check if you are already logged in elsewhere.</li>
+                   <li>Request a fresh link below.</li>
+                </ul>
              </div>
+
+             <Link 
+                to="/login"
+                className="inline-flex items-center justify-center w-full bg-[#111827] text-white font-bold py-4 rounded-xl hover:bg-black transition-colors shadow-lg"
+             >
+                Return to Login
+             </Link>
           </div>
         </div>
       );
@@ -187,7 +162,7 @@ export const ResetPassword: React.FC = () => {
 
           <div className="mb-8 text-center">
              <p className="text-green-600 bg-green-50 p-3 rounded-lg text-sm font-bold border border-green-100 inline-flex items-center gap-2">
-                <CheckCircle size={16} /> Secure Session Active
+                <CheckCircle size={16} /> Identity Verified
              </p>
              <p className="text-gray-500 text-xs mt-3">Please set your new password below.</p>
           </div>
