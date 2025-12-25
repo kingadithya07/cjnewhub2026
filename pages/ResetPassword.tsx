@@ -3,32 +3,45 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { supabase } from '../services/supabaseClient';
-import { Lock, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck, KeyRound, Loader2 } from 'lucide-react';
+import { Lock, CheckCircle, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck, KeyRound, Loader2 } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { verifyOTP, updatePassword, isAuthenticated, user } = useAuth();
 
-  // Extract email/code from URL parameters
+  // Helper: Safe Hash Params Parsing for Type Safety
+  const getHashToken = () => {
+      const hash = window.location.hash;
+      if (!hash) return null;
+      // Handle implicit flow #access_token=...
+      const cleanHash = hash.replace(/^#\/?/, '');
+      const params = new URLSearchParams(cleanHash.includes('?') ? cleanHash.split('?')[1] : cleanHash);
+      return params.get('access_token');
+  };
+
+  const getHashType = () => {
+      const hash = window.location.hash;
+      if (!hash) return null;
+      const cleanHash = hash.replace(/^#\/?/, '');
+      const params = new URLSearchParams(cleanHash.includes('?') ? cleanHash.split('?')[1] : cleanHash);
+      return params.get('type');
+  };
+
   const emailParam = searchParams.get('email') || '';
   const codeParam = searchParams.get('code') || searchParams.get('token');
-  
-  // Check for hash parameters (Supabase Implicit Flow often puts tokens in hash)
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#\/?/, '').split('?')[1] || window.location.hash.slice(1));
-  const typeParam = searchParams.get('type') || hashParams.get('type');
-  const accessTokenParam = hashParams.get('access_token');
+  const typeParam = searchParams.get('type') || getHashType();
+  const accessTokenParam = getHashToken();
 
   const [step, setStep] = useState<1 | 2>(1);
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [checkingSession, setCheckingSession] = useState(true); // New loading state for initial check
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState('');
 
-  // 1. CRITICAL: Watch for Authentication State
-  // If the user is authenticated (via Magic Link or Session Recovery), IMMEDIATELY go to Step 2.
+  // 1. Watch for Auth State
   useEffect(() => {
     if (isAuthenticated) {
       setStep(2);
@@ -36,20 +49,15 @@ export const ResetPassword: React.FC = () => {
     }
   }, [isAuthenticated]);
 
-  // 2. Check for Recovery Event or Hash Token
+  // 2. Recovery Logic
   useEffect(() => {
     let mounted = true;
 
     const checkRecovery = async () => {
-      // If we have an access token in the hash but aren't authenticated yet, Supabase is likely processing it.
-      // We keep 'checkingSession' true to show a spinner.
       if (accessTokenParam && typeParam === 'recovery') {
-         // Allow some time for Supabase onAuthStateChange to fire in AuthContext
-         // If it takes too long, we might need to notify user, but usually it's fast.
-         return;
+         return; // Supabase is processing
       }
       
-      // If no token and not authenticated, we stop checking and show Step 1 (Manual Code Entry)
       if (!isAuthenticated) {
           if (mounted) setCheckingSession(false);
       }
@@ -57,7 +65,6 @@ export const ResetPassword: React.FC = () => {
 
     checkRecovery();
     
-    // Listen specifically for the PASSWORD_RECOVERY event which signifies a successful link click
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
         if (mounted) {
@@ -73,19 +80,16 @@ export const ResetPassword: React.FC = () => {
     };
   }, [accessTokenParam, typeParam, isAuthenticated]);
 
-  // 3. Pre-fill OTP if 'code' param exists (PKCE Flow or Manual Link)
+  // 3. Auto-fill Code
   useEffect(() => {
     if (codeParam && step === 1) {
       const codeChars = codeParam.slice(0, 6).split('');
       const newOtp = [...otp];
       codeChars.forEach((char, i) => { if (i < 6) newOtp[i] = char; });
       setOtp(newOtp);
-      
-      // Optional: Auto-submit if we have a full code? 
-      // User might prefer to click verify to be sure.
     }
-  }, [codeParam, step]);
-
+  }, [codeParam, step]); 
+  
   const handleOtpChange = (index: number, value: string) => {
     if (!/^\d*$/.test(value)) return;
     const newOtp = [...otp];
@@ -107,12 +111,7 @@ export const ResetPassword: React.FC = () => {
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // If authenticated, we just move to step 2 (Verification is implicit)
-    if (isAuthenticated) {
-        setStep(2);
-        return;
-    }
+    if (isAuthenticated) { setStep(2); return; }
 
     const token = otp.join('');
     if (token.length < 6) return setError('Please enter the full 6-digit code.');
@@ -144,10 +143,7 @@ export const ResetPassword: React.FC = () => {
     setError('');
 
     try {
-      // Use email from params OR authenticated user
       const effectiveEmail = emailParam || user?.email;
-
-      // Prevent password reuse
       if (effectiveEmail) {
         const { data: reuseCheckData } = await supabase.auth.signInWithPassword({
             email: effectiveEmail,
@@ -173,8 +169,6 @@ export const ResetPassword: React.FC = () => {
     }
   };
 
-  // --- RENDER LOADING STATE ---
-  // If we suspect a recovery token is being processed, show spinner instead of Step 1 form
   if (checkingSession && (accessTokenParam || typeParam === 'recovery')) {
      return (
         <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
@@ -188,8 +182,6 @@ export const ResetPassword: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
-        
-        {/* Header */}
         <div className="bg-[#111827] p-8 text-center border-b-4 border-[#b4a070]">
            <div className="flex justify-center mb-6">
               <div className="bg-[#b4a070] text-black p-3 rounded-full shadow-lg">
@@ -229,7 +221,6 @@ export const ResetPassword: React.FC = () => {
                       type="text"
                       maxLength={1}
                       value={digit}
-                      // Only make readonly if we are effectively authenticated or loading
                       readOnly={isAuthenticated} 
                       onChange={(e) => handleOtpChange(index, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(index, e)}
@@ -260,7 +251,7 @@ export const ResetPassword: React.FC = () => {
             <div className="animate-in fade-in slide-in-from-right duration-500">
                <div className="mb-8 text-center">
                   <p className="text-green-600 bg-green-50 p-3 rounded-lg text-sm font-bold border border-green-100 inline-flex items-center gap-2">
-                     <CheckCircle2 size={16} /> Identity Verified
+                     <CheckCircle size={16} /> Identity Verified
                   </p>
                   <p className="text-gray-500 text-xs mt-3">Please set your new password below.</p>
                </div>
@@ -301,7 +292,7 @@ export const ResetPassword: React.FC = () => {
                     className="w-full bg-[#111827] hover:bg-black text-white font-bold py-5 rounded-2xl flex items-center justify-center space-x-3 transition-all shadow-xl active:scale-95 disabled:opacity-50"
                   >
                     <span className="text-lg">{loading ? 'Updating...' : 'Set New Password'}</span>
-                    {!loading && <CheckCircle2 size={22} className="text-[#b4a070]" />}
+                    {!loading && <CheckCircle size={22} className="text-[#b4a070]" />}
                   </button>
                 </div>
               </form>
