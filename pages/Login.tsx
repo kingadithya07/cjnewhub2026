@@ -1,6 +1,5 @@
 
 import React, { useState } from 'react';
-// Fix: Ensure standard v6 imports
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { UserRole } from '../types';
@@ -26,10 +25,8 @@ export const Login: React.FC = () => {
     try {
       const result = await login(email, password);
       if (result.success) {
-        // Successful login
         navigate('/');
       } else {
-        // Check for specific API Key error
         if (result.error?.includes('API key')) {
           setError('Invalid API Configuration. Please check your Supabase keys.');
         } else {
@@ -46,9 +43,14 @@ export const Login: React.FC = () => {
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await forgotPassword(email);
+    const success = await forgotPassword(email);
     setLoading(false);
-    setResetSent(true);
+    if (success) {
+      // Redirect to the combined ResetPassword page
+      navigate(`/reset-password?email=${encodeURIComponent(email)}`);
+    } else {
+      setError('Failed to send reset link. Please try again.');
+    }
   };
 
   if (isForgotPassword) {
@@ -69,14 +71,6 @@ export const Login: React.FC = () => {
             </div>
             
             <div className="p-8">
-              {resetSent ? (
-                <div className="text-center">
-                   <div className="bg-green-50 text-green-700 p-4 rounded-xl mb-6 text-sm border border-green-100">
-                      Check your email (<strong>{email}</strong>) for a recovery link.
-                   </div>
-                   <button onClick={() => setIsForgotPassword(false)} className="text-[#b4a070] font-black hover:underline tracking-tight uppercase text-xs">Return to Login</button>
-                </div>
-              ) : (
                 <form onSubmit={handleForgotPassword} className="space-y-6">
                   <div>
                     <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Email Address</label>
@@ -93,12 +87,12 @@ export const Login: React.FC = () => {
                   </div>
                   <button
                     type="submit" disabled={loading}
-                    className="w-full bg-[#111827] hover:bg-black text-white font-bold py-4 rounded-xl transition-all shadow-xl active:scale-95 disabled:opacity-50"
+                    className="w-full bg-[#111827] hover:bg-black text-white font-bold py-4 rounded-xl transition-all shadow-xl active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    {loading ? 'Sending...' : 'Send Recovery Link'}
+                    {loading ? 'Sending Code...' : 'Send Recovery Code'}
+                    {!loading && <ArrowRight size={20} className="text-[#b4a070]" />}
                   </button>
                 </form>
-              )}
             </div>
          </div>
       </div>
@@ -163,7 +157,6 @@ export const Login: React.FC = () => {
               </div>
             </div>
 
-            {/* Role Selection for easier identification */}
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Access As (Role)</label>
               <div className="relative">
@@ -179,7 +172,6 @@ export const Login: React.FC = () => {
                   <option value={UserRole.ADMIN}>Administrator (Full Access)</option>
                 </select>
               </div>
-              <p className="text-[10px] text-gray-400 mt-1.5 italic">* Role is determined by your account settings, this selector is for UI context.</p>
             </div>
 
             <div className="pt-2">

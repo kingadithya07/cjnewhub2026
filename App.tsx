@@ -12,6 +12,7 @@ import { Register } from './pages/Register';
 import { VerifyOTP } from './pages/VerifyOTP';
 import { AuthAction } from './pages/AuthAction';
 import { UpdatePassword } from './pages/UpdatePassword';
+import { ResetPassword } from './pages/ResetPassword';
 import { HeroSlider } from './components/HeroSlider';
 import { supabase } from './services/supabaseClient';
 import { Article, UserRole, EPaperPage, Classified } from './types';
@@ -214,6 +215,7 @@ const App: React.FC = () => {
           <Route path="/register" element={<Register />} />
           <Route path="/verify-otp" element={<VerifyOTP />} />
           <Route path="/update-password" element={<UpdatePassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/auth-success" element={<AuthAction />} />
           <Route path="/" element={<Layout><Home /></Layout>} />
           <Route path="/articles/:id" element={<Layout><ArticleDetail /></Layout>} />
