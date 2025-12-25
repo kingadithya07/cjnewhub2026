@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { supabase } from '../services/supabaseClient';
-import { Lock, CheckCircle, AlertCircle, ShieldCheck, Loader2, ArrowLeft } from 'lucide-react';
+import { Lock, CheckCircle, AlertCircle, ShieldCheck, Loader2, ArrowLeft, RefreshCw } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
   const navigate = useNavigate();
@@ -16,64 +16,86 @@ export const ResetPassword: React.FC = () => {
   const [validSession, setValidSession] = useState(false);
   const [checking, setChecking] = useState(true);
 
-  // Check session status on mount
+  // Use a ref to track if we found a session to prevent state updates after unmount
+  const sessionFoundRef = useRef(false);
+
   useEffect(() => {
     let mounted = true;
+    let attemptCount = 0;
+    const maxAttempts = 10; // Try for 5 seconds (500ms intervals)
 
-    const checkAuth = async () => {
-      // 1. If we are already fully authenticated via Context
-      if (isAuthenticated) {
-        if (mounted) {
-            setValidSession(true);
-            setChecking(false);
+    // Listener for immediate events
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
+        if (mounted && !sessionFoundRef.current) {
+           sessionFoundRef.current = true;
+           setValidSession(true);
+           setChecking(false);
         }
-        return;
       }
+    });
 
-      // 2. Check directly with Supabase (race condition handling)
+    const verifySession = async () => {
+      if (sessionFoundRef.current) return;
+
       try {
+        // Check 1: Context
+        if (isAuthenticated) {
+           if (mounted) {
+             sessionFoundRef.current = true;
+             setValidSession(true);
+             setChecking(false);
+           }
+           return;
+        }
+
+        // Check 2: Supabase Session (LocalStorage)
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
-          if (mounted) {
-            setValidSession(true);
-            setChecking(false);
-          }
-          return;
+           if (mounted) {
+             sessionFoundRef.current = true;
+             setValidSession(true);
+             setChecking(false);
+           }
+           return;
         }
 
-        // 3. If hash exists, give Supabase a moment to process the recovery token
-        if (window.location.hash && (window.location.hash.includes('access_token') || window.location.hash.includes('type=recovery'))) {
-            // Wait for onAuthStateChange to fire in the background
-            setTimeout(async () => {
-                 const { data: { session: retrySession } } = await supabase.auth.getSession();
-                 if (mounted) {
-                    setValidSession(!!retrySession);
-                    setChecking(false);
-                 }
-            }, 2000); // 2 second grace period for token exchange
+        // Check 3: Server User Check (Strongest check)
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        if (currentUser) {
+           if (mounted) {
+             sessionFoundRef.current = true;
+             setValidSession(true);
+             setChecking(false);
+           }
+           return;
+        }
+
+        // Retry Logic
+        if (attemptCount < maxAttempts) {
+           attemptCount++;
+           setTimeout(verifySession, 500); // Poll every 500ms
         } else {
-            // No hash, no session -> Invalid
-            if (mounted) {
-                setValidSession(false);
-                setChecking(false);
-            }
+           // If all attempts fail
+           if (mounted) {
+             setValidSession(false);
+             setChecking(false);
+           }
         }
       } catch (e) {
-        if (mounted) setChecking(false);
+        // Continue retrying if error (network glitch etc)
+        if (attemptCount < maxAttempts) {
+            attemptCount++;
+            setTimeout(verifySession, 500);
+         } else {
+            if (mounted) {
+              setChecking(false);
+            }
+         }
       }
     };
 
-    checkAuth();
-    
-    // Also listen specifically here in case the global listener is slow
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-        if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
-             if (mounted) {
-                 setValidSession(true);
-                 setChecking(false);
-             }
-        }
-    });
+    verifySession();
 
     return () => { 
         mounted = false; 
@@ -90,15 +112,18 @@ export const ResetPassword: React.FC = () => {
     setError('');
 
     try {
-      // Get current user email from session if context is not yet updated
+      // Get user email for reuse check
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       const targetEmail = user?.email || currentUser?.email;
 
       if (targetEmail) {
+        // Attempt sign in to check if password is same as old one
         const { data: reuseCheckData } = await supabase.auth.signInWithPassword({
             email: targetEmail,
             password: password
         });
+        
+        // If sign in succeeds, it means they are using the OLD password
         if (reuseCheckData.user) {
             setLoading(false);
             setError("You cannot use your previous password. Please choose a different one.");
@@ -123,8 +148,8 @@ export const ResetPassword: React.FC = () => {
      return (
         <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
             <Loader2 className="animate-spin text-[#b4a070] mb-4" size={48} />
-            <h2 className="text-xl font-bold text-gray-800">Verifying Secure Link...</h2>
-            <p className="text-gray-500 text-sm mt-2">Please wait while we validate your request.</p>
+            <h2 className="text-xl font-bold text-gray-800">Verifying Security Token...</h2>
+            <p className="text-gray-500 text-sm mt-2">Connecting to secure session.</p>
         </div>
      );
   }
@@ -137,16 +162,24 @@ export const ResetPassword: React.FC = () => {
              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
                 <AlertCircle size={32} />
              </div>
-             <h2 className="text-2xl font-bold text-gray-900 mb-2">Invalid or Expired Link</h2>
-             <p className="text-gray-500 mb-6">
-                This password reset link is invalid, has expired, or has already been used. Please request a new one.
+             <h2 className="text-2xl font-bold text-gray-900 mb-2">Link Expired</h2>
+             <p className="text-gray-500 mb-6 text-sm">
+                We couldn't verify your session. This usually happens if the link was already used or expired.
              </p>
-             <Link 
-                to="/login"
-                className="inline-flex items-center justify-center w-full bg-[#111827] text-white font-bold py-4 rounded-xl hover:bg-black transition-colors"
-             >
-                Return to Login
-             </Link>
+             <div className="space-y-3">
+                 <Link 
+                    to="/login"
+                    className="inline-flex items-center justify-center w-full bg-[#111827] text-white font-bold py-4 rounded-xl hover:bg-black transition-colors"
+                 >
+                    Return to Login
+                 </Link>
+                 <button 
+                    onClick={() => window.location.reload()} 
+                    className="w-full text-indigo-600 font-bold text-sm hover:underline flex items-center justify-center gap-2"
+                 >
+                    <RefreshCw size={14} /> Try Reloading Page
+                 </button>
+             </div>
           </div>
         </div>
       );
