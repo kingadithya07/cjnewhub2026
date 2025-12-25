@@ -9,6 +9,7 @@ interface AuthContextType extends AuthState {
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
   forgotPassword: (email: string) => Promise<{success: boolean, error?: string}>;
   updatePassword: (newPassword: string) => Promise<{success: boolean, error?: string}>;
+  connectionStatus: 'connecting' | 'online' | 'offline';
   isDeviceApproved: boolean;
   refreshDeviceStatus: () => Promise<void>;
 }
@@ -20,7 +21,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     user: null,
     isAuthenticated: false,
   });
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'online' | 'offline'>('connecting');
   const [isDeviceApproved, setIsDeviceApproved] = useState(true);
+
+  // Check if Supabase is reachable
+  const checkConnection = async () => {
+    try {
+      const { data, error } = await supabase.from('profiles').select('id').limit(1);
+      // Even if 'profiles' doesn't exist yet, a successful handshake (no fetch error) means online
+      setConnectionStatus('online');
+    } catch (err: any) {
+      if (err.message?.includes('fetch')) {
+        setConnectionStatus('offline');
+      } else {
+        setConnectionStatus('online');
+      }
+    }
+  };
 
   const fetchUserProfile = async (userId: string, email: string) => {
     try {
@@ -31,7 +48,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           isAuthenticated: true
         });
       } else {
-        // Safe fallback for new projects without profile tables
         setAuth({
           user: { id: userId, name: email.split('@')[0], email: email, role: UserRole.READER },
           isAuthenticated: true
@@ -46,12 +62,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   useEffect(() => {
-    // Check initial session
+    checkConnection();
+    
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) fetchUserProfile(session.user.id, session.user.email || '');
     });
 
-    // Listen for auth events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         fetchUserProfile(session.user.id, session.user.email || '');
@@ -69,13 +85,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Connection error. Please ensure your Supabase project is not paused." };
+      console.error("Login Network Error:", e);
+      return { 
+        success: false, 
+        error: "Failed to fetch: Connection to Supabase failed. Please check if your project is active and not paused." 
+      };
     }
   };
 
   const register = async (name: string, email: string, password: string, role: UserRole) => {
     try {
-      // Basic registration to avoid trigger conflicts
       const { error } = await supabase.auth.signUp({
         email, 
         password,
@@ -87,20 +106,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Registration failed. Check network or Supabase status." };
+      console.error("Registration Network Error:", e);
+      return { 
+        success: false, 
+        error: "Failed to fetch: Could not reach Supabase servers. Ensure you have a stable internet connection and the project URL is correct." 
+      };
     }
   };
 
   const forgotPassword = async (email: string) => {
     try {
-      // Use standard hash-based redirect for better compatibility with single-page apps
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/#/reset-password`
       });
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Failed to send reset link. Try again later." };
+      return { success: false, error: "Network error while sending reset link." };
     }
   };
 
@@ -110,7 +132,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Failed to update password. Session might have expired." };
+      return { success: false, error: "Network error while updating password." };
     }
   };
 
@@ -123,7 +145,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <AuthContext.Provider value={{ ...auth, isDeviceApproved, login, logout, register, forgotPassword, updatePassword, refreshDeviceStatus }}>
+    <AuthContext.Provider value={{ 
+      ...auth, 
+      connectionStatus,
+      isDeviceApproved, 
+      login, 
+      logout, 
+      register, 
+      forgotPassword, 
+      updatePassword, 
+      refreshDeviceStatus 
+    }}>
       {children}
     </AuthContext.Provider>
   );

@@ -3,18 +3,17 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { UserRole } from '../types';
-import { Newspaper, Lock, Mail, ArrowRight, ArrowLeft, KeyRound, Shield, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Newspaper, Lock, Mail, ArrowRight, ArrowLeft, KeyRound, Shield, AlertCircle, CheckCircle2, Wifi, WifiOff } from 'lucide-react';
 
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState<UserRole>(UserRole.READER);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [resetSent, setResetSent] = useState(false);
 
-  const { login, forgotPassword } = useAuth();
+  const { login, forgotPassword, connectionStatus } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -27,7 +26,11 @@ export const Login: React.FC = () => {
       if (result.success) {
         navigate('/');
       } else {
-        setError(result.error || 'Invalid credentials.');
+        let msg = result.error || 'Invalid credentials.';
+        if (msg.includes('Email not confirmed')) {
+          msg = "Email not confirmed. Please check your inbox for the verification link before logging in.";
+        }
+        setError(msg);
       }
     } catch (err) {
       setError('Connection failure. Check if Supabase project is active.');
@@ -54,9 +57,17 @@ export const Login: React.FC = () => {
     }
   };
 
+  const ConnectionBadge = () => (
+    <div className={`fixed bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-lg z-50 transition-all ${connectionStatus === 'online' ? 'bg-green-100 text-green-700' : connectionStatus === 'offline' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-400'}`}>
+      {connectionStatus === 'online' ? <Wifi size={12} /> : <WifiOff size={12} />}
+      {connectionStatus === 'online' ? 'System Online' : connectionStatus === 'offline' ? 'System Offline' : 'Connecting...'}
+    </div>
+  );
+
   if (isForgotPassword) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative">
+         <ConnectionBadge />
          <button onClick={() => setIsForgotPassword(false)} className="absolute top-6 left-6 flex items-center text-gray-500 hover:text-indigo-900 gap-2 font-medium z-10 transition-transform active:scale-95">
             <div className="bg-white p-2 rounded-full shadow-sm border border-gray-100"><ArrowLeft size={20} /></div>
             <span className="hidden sm:inline">Back to Login</span>
@@ -106,15 +117,15 @@ export const Login: React.FC = () => {
                     </div>
                   </div>
                   <button
-                    type="submit" disabled={loading}
+                    type="submit" disabled={loading || connectionStatus === 'offline'}
                     className="w-full bg-[#111827] hover:bg-black text-white font-bold py-5 rounded-2xl transition-all shadow-xl active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     <span>{loading ? 'Processing...' : 'Send Reset Link'}</span>
                     {!loading && <ArrowRight size={20} className="text-[#b4a070]" />}
                   </button>
-                  <p className="text-center text-xs text-gray-400 mt-4 leading-relaxed">
-                    Note: It may take up to 2 minutes for the email to arrive. Check your spam folder if it doesn't appear.
-                  </p>
+                  {connectionStatus === 'offline' && (
+                    <p className="text-center text-xs text-red-500 font-bold mt-2">Supabase is currently unreachable.</p>
+                  )}
                 </form>
               )}
             </div>
@@ -125,6 +136,7 @@ export const Login: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 relative">
+      <ConnectionBadge />
       <Link to="/" className="absolute top-6 left-6 flex items-center text-gray-500 hover:text-indigo-900 transition-colors gap-2 font-medium z-10">
         <ArrowLeft size={20} />
         <span className="hidden sm:inline">Back to Home</span>
@@ -184,7 +196,7 @@ export const Login: React.FC = () => {
             <div className="pt-2">
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || connectionStatus === 'offline'}
                 className="w-full bg-[#111827] hover:bg-black text-white font-bold py-5 rounded-2xl flex items-center justify-center space-x-2 transition-all shadow-xl active:scale-95 disabled:opacity-50"
               >
                 <span className="text-lg">{loading ? 'Verifying...' : 'Sign In'}</span>
