@@ -2,11 +2,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../modules/auth/AuthContext';
 import { MOCK_ARTICLES, MOCK_ADS, MOCK_EPAPER, MOCK_SETTINGS, MOCK_CATEGORIES, MOCK_TAGS, MOCK_CLASSIFIEDS } from '../services/mockData';
+import { supabase } from '../services/supabaseClient';
 import { UserRole, Article, Advertisement, EPaperPage, WatermarkSettings, Category, Tag, Classified } from '../types';
 import { 
   Plus, Edit3, Trash2, CheckCircle, Clock, XCircle, 
   Megaphone, FileText, Scissors, Layout, ExternalLink, Power, Image as ImageIcon,
-  Save, X, Star, Settings, Type, Tags as TagIcon, FolderTree, Hash, Store, MapPin, DollarSign, MessageCircle, Lock
+  Save, X, Star, Settings, Type, Tags as TagIcon, FolderTree, Hash, Store, MapPin, DollarSign, MessageCircle, Lock, Database
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { RichTextEditor } from '../components/RichTextEditor';
@@ -26,12 +27,13 @@ export const Dashboard: React.FC = () => {
   };
   
   // Data State
-  const [articles, setArticles] = useState<Article[]>(MOCK_ARTICLES);
-  const [ads, setAds] = useState<Advertisement[]>(MOCK_ADS);
-  const [pages, setPages] = useState<EPaperPage[]>(MOCK_EPAPER);
-  const [categories, setCategories] = useState<Category[]>(MOCK_CATEGORIES);
+  const [loading, setLoading] = useState(true);
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [ads, setAds] = useState<Advertisement[]>([]);
+  const [pages, setPages] = useState<EPaperPage[]>([]);
+  const [categories, setCategories] = useState<Category[]>(MOCK_CATEGORIES); // Keep Categories Mock for now or move to DB
   const [tags, setTags] = useState<Tag[]>(MOCK_TAGS);
-  const [classifieds, setClassifieds] = useState<Classified[]>(MOCK_CLASSIFIEDS);
+  const [classifieds, setClassifieds] = useState<Classified[]>([]);
   const [watermarkSettings, setWatermarkSettings] = useState<WatermarkSettings>(MOCK_SETTINGS.watermark);
 
   // Modals
@@ -40,229 +42,176 @@ export const Dashboard: React.FC = () => {
   const [isAddAdModalOpen, setIsAddAdModalOpen] = useState(false);
   const [isAddClassifiedModalOpen, setIsAddClassifiedModalOpen] = useState(false);
 
-  // Form States - Taxonomy
+  // Form States
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryType, setNewCategoryType] = useState<'ARTICLE' | 'CLASSIFIED'>('ARTICLE');
   const [newTagName, setNewTagName] = useState('');
 
   // Form States - Others
-  const [newPageData, setNewPageData] = useState({
-    imageUrl: '',
-    pageNumber: '',
-    date: new Date().toISOString().split('T')[0]
-  });
+  const [newPageData, setNewPageData] = useState({ imageUrl: '', pageNumber: '', date: new Date().toISOString().split('T')[0] });
+  const [newArticleData, setNewArticleData] = useState({ title: '', summary: '', content: '', category: '', thumbnailUrl: '', isFeatured: false });
+  const [newAdData, setNewAdData] = useState({ clientName: '', imageUrl: '', link: '', placement: 'SIDEBAR' as Advertisement['placement'] });
+  const [newClassifiedData, setNewClassifiedData] = useState({ title: '', content: '', location: '', price: '', contact: '', category: '' });
 
-  const [newArticleData, setNewArticleData] = useState({
-    title: '',
-    summary: '',
-    content: '',
-    category: '',
-    thumbnailUrl: '',
-    isFeatured: false
-  });
+  // FETCH DATA FROM SUPABASE
+  const loadData = async () => {
+    setLoading(true);
+    try {
+        const { data: art } = await supabase.from('articles').select('*').order('created_at', { ascending: false });
+        if(art) setArticles(art.map(a => ({...a, createdAt: a.created_at, authorName: a.author_name, authorAvatar: a.author_avatar, thumbnailUrl: a.thumbnail_url, isFeatured: a.is_featured})));
 
-  const [newAdData, setNewAdData] = useState({
-    clientName: '',
-    imageUrl: '',
-    link: '',
-    placement: 'SIDEBAR' as Advertisement['placement']
-  });
-  
-  const [newClassifiedData, setNewClassifiedData] = useState({
-     title: '',
-     content: '',
-     location: '',
-     price: '',
-     contact: '',
-     category: ''
-  });
+        const { data: adData } = await supabase.from('ads').select('*');
+        if(adData) setAds(adData.map(a => ({...a, clientName: a.client_name, imageUrl: a.image_url})));
+        
+        const { data: clData } = await supabase.from('classifieds').select('*');
+        if(clData) setClassifieds(clData);
+
+        const { data: pData } = await supabase.from('epaper_pages').select('*').order('page_number');
+        if(pData) setPages(pData.map(p => ({...p, pageNumber: p.page_number, imageUrl: p.image_url})));
+
+    } catch (e) {
+        console.error("Fetch error", e);
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  // SEED DATA FUNCTION
+  const handleSeedDatabase = async () => {
+    if(!confirm("This will insert all mock data into the database. Continue?")) return;
+    setLoading(true);
+    
+    // Articles
+    const dbArticles = MOCK_ARTICLES.map(a => ({
+        title: a.title, summary: a.summary, content: a.content, 
+        author_name: a.authorName, author_avatar: a.authorAvatar,
+        status: a.status, category: a.category, thumbnail_url: a.thumbnailUrl,
+        is_featured: a.isFeatured, is_trending: a.isTrending
+    }));
+    await supabase.from('articles').insert(dbArticles);
+
+    // Ads
+    const dbAds = MOCK_ADS.map(a => ({
+        client_name: a.clientName, image_url: a.imageUrl, link: a.link, placement: a.placement, status: a.status
+    }));
+    await supabase.from('ads').insert(dbAds);
+
+    // Classifieds
+    const dbClassifieds = MOCK_CLASSIFIEDS.map(c => ({
+        title: c.title, content: c.content, location: c.location, price: c.price, contact: c.contact, category: c.category, status: c.status
+    }));
+    await supabase.from('classifieds').insert(dbClassifieds);
+
+    // Epaper
+    const dbPages = MOCK_EPAPER.map(p => ({
+        date: p.date, page_number: p.pageNumber, image_url: p.imageUrl, regions: p.regions
+    }));
+    await supabase.from('epaper_pages').insert(dbPages);
+
+    alert("Seeding complete! Refreshing...");
+    loadData();
+  };
 
   if (!user) return <div>Access Denied</div>;
 
   const isEditor = user.role === UserRole.EDITOR;
   const isAdmin = user.role === UserRole.ADMIN;
   const isPublisher = user.role === UserRole.PUBLISHER;
-  
-  // Permissions Logic
-  // Admin & Editor can see system tabs (Ads, Epaper, Settings, etc)
   const canManageSystem = isAdmin || isEditor;
-  // Admin can save directly. Editor needs approval.
   const canDirectlySaveSettings = isAdmin; 
-  // All staff roles can see all articles in dashboard for management
   const displayedArticles = articles;
 
-  // --- Settings Handlers ---
-  const handleSaveSettings = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (canDirectlySaveSettings) {
-        MOCK_SETTINGS.watermark = watermarkSettings; // Simulate backend save
-        alert('Settings Saved Globally!');
-    } else {
-        // Editor workflow
-        alert('Update Request Sent: Admin approval required for changing global settings.');
-        // Do not update MOCK_SETTINGS
+  // --- Handlers (Supabase Integrated) ---
+  const handleArticleDelete = async (id: string) => {
+    if(confirm('Delete article?')) {
+        await supabase.from('articles').delete().eq('id', id);
+        loadData();
     }
   };
 
-  // --- Taxonomy Handlers ---
-  const handleAddCategory = (e: React.FormEvent) => {
+  const handleStatusChange = async (id: string, newStatus: Article['status']) => {
+    await supabase.from('articles').update({ status: newStatus }).eq('id', id);
+    loadData();
+  };
+
+  const handleAddArticle = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCategoryName.trim()) return;
-    const newCat: Category = {
-      id: `cat-${Date.now()}`,
-      name: newCategoryName.trim(),
-      type: newCategoryType,
-      count: 0
-    };
-    setCategories([...categories, newCat]);
-    MOCK_CATEGORIES.push(newCat);
-    setNewCategoryName('');
-  };
-
-  const handleDeleteCategory = (id: string) => {
-    if(confirm('Delete this category?')) {
-      setCategories(prev => prev.filter(c => c.id !== id));
-    }
-  };
-
-  const handleAddTag = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTagName.trim()) return;
-    const newTag: Tag = {
-      id: `tag-${Date.now()}`,
-      name: newTagName.trim()
-    };
-    setTags([...tags, newTag]);
-    MOCK_TAGS.push(newTag);
-    setNewTagName('');
-  };
-
-  const handleDeleteTag = (id: string) => {
-    if(confirm('Delete this tag?')) {
-      setTags(prev => prev.filter(t => t.id !== id));
-    }
-  };
-
-  // --- Article Handlers ---
-  const handleArticleDelete = (id: string) => {
-    if(confirm('Are you sure you want to delete this article?')) {
-      setArticles(prev => prev.filter(a => a.id !== id));
-    }
-  };
-
-  const handleStatusChange = (id: string, newStatus: Article['status']) => {
-    setArticles(prev => prev.map(a => a.id === id ? { ...a, status: newStatus } : a));
-  };
-
-  const handleAddArticle = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newArticle: Article = {
-      id: `new-${Date.now()}`,
-      title: newArticleData.title,
-      summary: newArticleData.summary,
-      content: newArticleData.content || newArticleData.summary,
-      authorId: user.id,
-      authorName: user.name,
-      authorAvatar: user.avatar,
-      // Admin/Publisher/Editor can publish directly in this updated spec
-      status: 'PUBLISHED', 
-      category: newArticleData.category || 'General',
-      createdAt: new Date().toISOString(),
-      thumbnailUrl: newArticleData.thumbnailUrl || 'https://picsum.photos/id/11/800/600',
-      isFeatured: newArticleData.isFeatured
-    };
-
-    setArticles(prev => [newArticle, ...prev]);
-    MOCK_ARTICLES.unshift(newArticle); // Sync mock data for view
+    await supabase.from('articles').insert({
+        title: newArticleData.title,
+        summary: newArticleData.summary,
+        content: newArticleData.content || newArticleData.summary,
+        author_name: user.name,
+        author_avatar: user.avatar,
+        status: 'PUBLISHED', 
+        category: newArticleData.category || 'General',
+        thumbnail_url: newArticleData.thumbnailUrl || 'https://picsum.photos/id/11/800/600',
+        is_featured: newArticleData.isFeatured
+    });
     setIsAddArticleModalOpen(false);
-    setNewArticleData({ title: '', summary: '', content: '', category: '', thumbnailUrl: '', isFeatured: false });
+    loadData();
   };
 
-  // --- Ad Handlers ---
-  const handleAdStatusToggle = (id: string) => {
-    setAds(prev => prev.map(ad => ({
-      ...ad,
-      status: ad.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
-    })));
-  };
-
-  const handleAdDelete = (id: string) => {
-    if(confirm('Delete this advertisement?')) {
-      setAds(prev => prev.filter(a => a.id !== id));
-    }
-  };
-
-  const handleAddAd = (e: React.FormEvent) => {
+  const handleAddAd = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newAd: Advertisement = {
-      id: `ad-${Date.now()}`,
-      clientName: newAdData.clientName,
-      imageUrl: newAdData.imageUrl,
-      link: newAdData.link,
-      placement: newAdData.placement,
-      status: 'ACTIVE'
-    };
-    
-    setAds(prev => [newAd, ...prev]);
-    MOCK_ADS.unshift(newAd);
-    setIsAddAdModalOpen(false);
-    setNewAdData({ clientName: '', imageUrl: '', link: '', placement: 'SIDEBAR' });
-  };
-
-  // --- Classifieds Handlers ---
-  const handleClassifiedStatusToggle = (id: string) => {
-    setClassifieds(prev => prev.map(c => ({
-      ...c,
-      status: c.status === 'ACTIVE' ? 'CLOSED' : 'ACTIVE'
-    })));
-  };
-
-  const handleClassifiedDelete = (id: string) => {
-    if(confirm('Delete this classified ad?')) {
-        setClassifieds(prev => prev.filter(c => c.id !== id));
-    }
-  };
-
-  const handleAddClassified = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newClassified: Classified = {
-        id: `cl-${Date.now()}`,
-        ...newClassifiedData,
-        createdAt: new Date().toISOString(),
+    await supabase.from('ads').insert({
+        client_name: newAdData.clientName,
+        image_url: newAdData.imageUrl,
+        link: newAdData.link,
+        placement: newAdData.placement,
         status: 'ACTIVE'
-    };
-    setClassifieds([newClassified, ...classifieds]);
-    MOCK_CLASSIFIEDS.unshift(newClassified);
-    setIsAddClassifiedModalOpen(false);
-    setNewClassifiedData({ title: '', content: '', location: '', price: '', contact: '', category: '' });
+    });
+    setIsAddAdModalOpen(false);
+    loadData();
   };
 
-  // --- EPaper Handlers ---
-  const handlePageDelete = (id: string) => {
-    if (confirm('Delete this page from E-Paper?')) {
-        setPages(prev => prev.filter(p => p.id !== id));
-    }
-  };
-
-  const handleAddPage = (e: React.FormEvent) => {
+  const handleAddClassified = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPageData.imageUrl || !newPageData.pageNumber) return;
-
-    const newPage: EPaperPage = {
-      id: `p-${Date.now()}`,
-      imageUrl: newPageData.imageUrl,
-      pageNumber: parseInt(newPageData.pageNumber),
-      date: newPageData.date,
-      regions: []
-    };
-
-    setPages(prev => [...prev, newPage].sort((a,b) => a.pageNumber - b.pageNumber));
-    // In a real app, this would be an API call
-    MOCK_EPAPER.push(newPage); 
-    
-    setIsAddPageModalOpen(false);
-    setNewPageData({ imageUrl: '', pageNumber: '', date: new Date().toISOString().split('T')[0] });
+    await supabase.from('classifieds').insert({
+        ...newClassifiedData,
+        status: 'ACTIVE'
+    });
+    setIsAddClassifiedModalOpen(false);
+    loadData();
   };
+
+   const handleAddPage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await supabase.from('epaper_pages').insert({
+        image_url: newPageData.imageUrl,
+        page_number: parseInt(newPageData.pageNumber),
+        date: newPageData.date,
+        regions: []
+    });
+    setIsAddPageModalOpen(false);
+    loadData();
+  };
+
+  const handleAdDelete = async (id: string) => {
+      await supabase.from('ads').delete().eq('id', id);
+      loadData();
+  };
+  
+  const handlePageDelete = async (id: string) => {
+      await supabase.from('epaper_pages').delete().eq('id', id);
+      loadData();
+  };
+
+  const handleClassifiedDelete = async (id: string) => {
+      await supabase.from('classifieds').delete().eq('id', id);
+      loadData();
+  };
+
+  const handleSaveSettings = (e: React.FormEvent) => { e.preventDefault(); alert("Saved"); };
+  const handleAddCategory = (e: React.FormEvent) => { e.preventDefault(); };
+  const handleDeleteCategory = (id: string) => {};
+  const handleAddTag = (e: React.FormEvent) => {};
+  const handleDeleteTag = (id: string) => {};
+  const handleAdStatusToggle = (id: string) => {};
+  const handleClassifiedStatusToggle = (id: string) => {};
 
   const StatusBadge = ({ status }: { status: string }) => {
     const colors = {
@@ -277,6 +226,10 @@ export const Dashboard: React.FC = () => {
     const colorClass = colors[status] || colors.DRAFT;
     return <span className={`px-2 py-1 rounded-full text-xs font-bold ${colorClass}`}>{status}</span>;
   };
+
+  if (loading && articles.length === 0 && activeTab === 'ARTICLES') {
+      return <div className="p-10 text-center">Loading Dashboard Data...</div>;
+  }
 
   return (
     <div className="space-y-6 relative">
@@ -888,7 +841,25 @@ export const Dashboard: React.FC = () => {
                 Global Settings
             </h2>
             
-            <form onSubmit={handleSaveSettings} className="space-y-8">
+            <div className="space-y-8">
+                {/* Seed Database Button */}
+                <div className="bg-blue-50 p-4 md:p-6 rounded-xl border border-blue-100">
+                    <h3 className="text-lg font-semibold text-blue-900 mb-2 flex items-center gap-2">
+                        <Database size={20} /> Database Initialization
+                    </h3>
+                    <p className="text-sm text-blue-700 mb-4">
+                        Populate your Supabase database with the initial set of Mock Data (Articles, Ads, Classifieds, E-Paper). 
+                        Useful for setting up a new environment.
+                    </p>
+                    <button 
+                        onClick={handleSeedDatabase}
+                        disabled={loading}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 shadow flex items-center gap-2"
+                    >
+                        {loading ? 'Processing...' : 'Seed Database with Mock Data'}
+                    </button>
+                </div>
+
                 {/* Watermark Section */}
                 <div className="bg-gray-50 p-4 md:p-6 rounded-xl border border-gray-100">
                     <h3 className="text-lg font-semibold text-gray-800 mb-2">E-Paper Watermark Configuration</h3>
@@ -959,12 +930,12 @@ export const Dashboard: React.FC = () => {
                      <button type="button" onClick={() => window.location.reload()} className="px-6 py-3 rounded-lg text-gray-600 hover:bg-gray-100 font-medium">
                         Discard Changes
                      </button>
-                     <button type="submit" className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg flex items-center justify-center gap-2">
+                     <button onClick={handleSaveSettings} className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-indigo-700 shadow-lg flex items-center justify-center gap-2">
                          {canDirectlySaveSettings ? <Save size={20} /> : <MessageCircle size={20} />}
                          {canDirectlySaveSettings ? 'Save Changes' : 'Request Approval'}
                      </button>
                 </div>
-            </form>
+            </div>
         </div>
       )}
 

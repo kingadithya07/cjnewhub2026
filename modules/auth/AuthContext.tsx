@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User, UserRole, AuthState } from '../../types';
-import { MOCK_USERS } from '../../services/mockData';
+import { supabase } from '../../services/supabaseClient';
 
 interface AuthContextType extends AuthState {
   login: (email: string, password?: string) => Promise<boolean>;
@@ -18,116 +18,93 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isAuthenticated: false,
   });
 
-  // Initialize DB from Mock data if empty
-  useEffect(() => {
+  // Fetch user profile (including role) from 'profiles' table
+  const fetchProfile = async (userId: string, email: string) => {
     try {
-      const existingUsers = localStorage.getItem('newsflow_users_db');
-      if (!existingUsers) {
-        localStorage.setItem('newsflow_users_db', JSON.stringify(MOCK_USERS));
-      } else {
-        // Validate JSON
-        JSON.parse(existingUsers);
-      }
-    } catch (e) {
-      console.error("Error parsing user DB, resetting to mock data", e);
-      localStorage.setItem('newsflow_users_db', JSON.stringify(MOCK_USERS));
-    }
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .single();
 
-    // Check for active session
-    try {
-      const storedUser = localStorage.getItem('newsflow_active_user');
-      if (storedUser) {
-        const parsedUser = JSON.parse(storedUser);
-        if (parsedUser && parsedUser.id) {
-            setAuth({ user: parsedUser, isAuthenticated: true });
+        if (data) {
+            const user: User = {
+                id: data.id,
+                name: data.name,
+                email: data.email,
+                role: data.role as UserRole,
+                avatar: data.avatar
+            };
+            setAuth({ user, isAuthenticated: true });
         } else {
-            localStorage.removeItem('newsflow_active_user');
+             // Fallback if profile trigger failed
+             setAuth({ 
+                user: { id: userId, email: email, name: email.split('@')[0], role: UserRole.READER }, 
+                isAuthenticated: true 
+             });
         }
-      }
     } catch (e) {
-      console.error("Error parsing active user, logging out", e);
-      localStorage.removeItem('newsflow_active_user');
+        console.error("Profile fetch error", e);
     }
+  };
+
+  useEffect(() => {
+    // Check active session on mount
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        fetchProfile(session.user.id, session.user.email!);
+      }
+    });
+
+    // Listen for changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        fetchProfile(session.user.id, session.user.email!);
+      } else {
+        setAuth({ user: null, isAuthenticated: false });
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const login = async (email: string, password?: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        try {
-            const usersDb: User[] = JSON.parse(localStorage.getItem('newsflow_users_db') || '[]');
-            
-            // Find user by email and password
-            const foundUser = usersDb.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-            
-            if (foundUser) {
-            setAuth({ user: foundUser, isAuthenticated: true });
-            localStorage.setItem('newsflow_active_user', JSON.stringify(foundUser));
-            resolve(true);
-            } else {
-            resolve(false);
-            }
-        } catch (e) {
-            console.error("Login error", e);
-            resolve(false);
-        }
-      }, 800);
+    if (!password) return false;
+    const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password
     });
+    return !error;
   };
 
   const register = async (name: string, email: string, password: string, role: UserRole): Promise<boolean> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        try {
-            const usersDb: User[] = JSON.parse(localStorage.getItem('newsflow_users_db') || '[]');
-            
-            // Check if exists
-            if (usersDb.some(u => u.email.toLowerCase() === email.toLowerCase())) {
-            alert("Email already exists!");
-            resolve(false);
-            return;
-            }
-
-            const newUser: User = { 
-            id: Date.now().toString(), 
-            name, 
-            email, 
-            password, 
-            role, 
-            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`
-            };
-
-            const updatedDb = [...usersDb, newUser];
-            localStorage.setItem('newsflow_users_db', JSON.stringify(updatedDb));
-            
-            // Auto login after register
-            setAuth({ user: newUser, isAuthenticated: true });
-            localStorage.setItem('newsflow_active_user', JSON.stringify(newUser));
-            resolve(true);
-        } catch (e) {
-            console.error("Register error", e);
-            resolve(false);
+    const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+            data: { name } // Passed to trigger
         }
-      }, 800);
     });
+
+    if (!error) {
+        // Note: The Trigger in db_schema.sql creates the profile. 
+        // However, for immediate update of Role (default is READER), we might need to manual update if allowed,
+        // or the user must be READER first. For this demo, we assume the trigger handles creation.
+        // If we want to enforce specific roles on signup (security risk if public), we would need a secure backend function.
+        // Here we just let them sign up.
+        return true;
+    }
+    return false;
   };
 
   const forgotPassword = async (email: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-         try {
-             const usersDb: User[] = JSON.parse(localStorage.getItem('newsflow_users_db') || '[]');
-             const exists = usersDb.some(u => u.email.toLowerCase() === email.toLowerCase());
-             resolve(exists);
-         } catch (e) {
-             resolve(false);
-         }
-      }, 1000);
-    });
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    return !error;
   };
 
-  const logout = () => {
+  const logout = async () => {
+    await supabase.auth.signOut();
     setAuth({ user: null, isAuthenticated: false });
-    localStorage.removeItem('newsflow_active_user');
   };
 
   return (
