@@ -1,18 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-// IMPORTANT: Ensure these environment variables are set in your .env file
-// VITE_SUPABASE_URL=your_project_url
-// VITE_SUPABASE_ANON_KEY=your_anon_key
-
-const env = (import.meta as any).env || {};
-
-// If keys are missing, the app will still initialize but API calls will fail with 401/403.
-// This allows the UI to render and show helpful error messages to the developer.
-const supabaseUrl = env.VITE_SUPABASE_URL || 'https://agdfgesflpzvuuwkczwa.supabase.co';
-const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || 'no-api-key-provided';
-
-if (supabaseAnonKey === 'no-api-key-provided') {
-  console.warn("Supabase API Key is missing. Please check your environment variables.");
-}
+// Provided Supabase credentials
+const supabaseUrl = 'https://agdfgesflpzvuuwkczwa.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFnZGZnZXNmbHB6dnV1d2tjendhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU2Mzk2MDYsImV4cCI6MjA4MTIxNTYwNn0.5hFAKh5llOGg65IQjb5YyBlRpk-28BZEga76K_VdSyk';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);

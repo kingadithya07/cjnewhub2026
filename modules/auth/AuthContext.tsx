@@ -37,7 +37,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           isAuthenticated: true
         });
       } else {
-        // Fallback if profile trigger hasn't finished yet
+        // Fallback for new signups while trigger processes
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           setAuth({
@@ -52,7 +52,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
     } catch (err) {
-      console.error("Error fetching profile:", err);
+      console.error("Profile error:", err);
     }
   };
 
@@ -86,17 +86,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       email,
       password,
       options: {
-        data: { name, role }, // Role passed to SQL trigger via raw_user_meta_data
+        data: { name, role },
         emailRedirectTo: window.location.origin
       }
     });
     
     if (error) return { success: false, error: error.message };
-    
-    if (data.user) {
-        await fetchUserProfile(data.user.id);
-    }
-    
+    if (data.user) await fetchUserProfile(data.user.id);
     return { success: true };
   };
 
