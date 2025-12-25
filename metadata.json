@@ -1,5 +1,5 @@
 {
-  "name": "NewsFlow & E-Paper",
+  "name": "newsflow-epaper",
   "description": "A comprehensive responsive platform for short-format article publishing and e-paper viewing with advanced cropping and watermarking capabilities. Features role-based access for Admins, Publishers, Editors, and Readers.",
   "requestFramePermissions": []
 }
