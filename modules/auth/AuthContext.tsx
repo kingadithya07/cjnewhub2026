@@ -1,10 +1,12 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User, UserRole, AuthState } from '../../types';
-import { supabase } from '../../services/supabaseClient';
+import { supabase, supabaseUrl } from '../../services/supabaseClient';
+import { MOCK_USERS } from '../../services/mockData';
 
 interface AuthContextType extends AuthState {
   login: (email: string, password?: string) => Promise<{success: boolean, error?: string}>;
+  loginAsDemo: (role?: UserRole) => void;
   logout: () => void;
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
   forgotPassword: (email: string) => Promise<{success: boolean, error?: string}>;
@@ -24,18 +26,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'online' | 'offline'>('connecting');
   const [isDeviceApproved, setIsDeviceApproved] = useState(true);
 
-  // Check if Supabase is reachable
   const checkConnection = async () => {
     try {
-      const { data, error } = await supabase.from('profiles').select('id').limit(1);
-      // Even if 'profiles' doesn't exist yet, a successful handshake (no fetch error) means online
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      
+      const response = await fetch(`${supabaseUrl}/rest/v1/`, { 
+        method: 'GET', 
+        headers: { 'apikey': 'health-check' },
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
       setConnectionStatus('online');
+      return true;
     } catch (err: any) {
-      if (err.message?.includes('fetch')) {
-        setConnectionStatus('offline');
-      } else {
-        setConnectionStatus('online');
-      }
+      console.warn("Supabase connectivity probe failed. Project might be paused or domain blocked.");
+      setConnectionStatus('offline');
+      return false;
     }
   };
 
@@ -62,33 +70,60 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   useEffect(() => {
-    checkConnection();
-    
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) fetchUserProfile(session.user.id, session.user.email || '');
-    });
+    const init = async () => {
+      const isOnline = await checkConnection();
+      
+      if (isOnline) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) fetchUserProfile(session.user.id, session.user.email || '');
+        } catch (e) {
+          console.error("Auth session check failed", e);
+        }
+      }
+
+      // Check for demo session (works offline)
+      const isDemo = window.sessionStorage.getItem('demo_mode');
+      const demoUser = window.sessionStorage.getItem('demo_user');
+      if (isDemo && demoUser) {
+        setAuth({ user: JSON.parse(demoUser), isAuthenticated: true });
+      }
+    };
+
+    init();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         fetchUserProfile(session.user.id, session.user.email || '');
       } else {
-        setAuth({ user: null, isAuthenticated: false });
+        if (!window.sessionStorage.getItem('demo_mode')) {
+          setAuth({ user: null, isAuthenticated: false });
+        }
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
+  const loginAsDemo = (role: UserRole = UserRole.ADMIN) => {
+    const mockUser = MOCK_USERS.find(u => u.role === role) || MOCK_USERS[0];
+    setAuth({ user: mockUser, isAuthenticated: true });
+    window.sessionStorage.setItem('demo_mode', 'true');
+    window.sessionStorage.setItem('demo_user', JSON.stringify(mockUser));
+  };
+
   const login = async (email: string, password?: string) => {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password: password || '' });
       if (error) return { success: false, error: error.message };
+      window.sessionStorage.removeItem('demo_mode');
+      window.sessionStorage.removeItem('demo_user');
       return { success: true };
     } catch (e: any) {
-      console.error("Login Network Error:", e);
+      setConnectionStatus('offline');
       return { 
         success: false, 
-        error: "Failed to fetch: Connection to Supabase failed. Please check if your project is active and not paused." 
+        error: "Connection failure: Could not reach Supabase. This usually means the database project is PAUSED." 
       };
     }
   };
@@ -98,31 +133,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const { error } = await supabase.auth.signUp({
         email, 
         password,
-        options: {
-          data: { name, role },
-          emailRedirectTo: window.location.origin
-        }
+        options: { data: { name, role } }
       });
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      console.error("Registration Network Error:", e);
+      setConnectionStatus('offline');
       return { 
         success: false, 
-        error: "Failed to fetch: Could not reach Supabase servers. Ensure you have a stable internet connection and the project URL is correct." 
+        error: "Registration failed: Backend unreachable." 
       };
     }
   };
 
   const forgotPassword = async (email: string) => {
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/#/reset-password`
-      });
+      const { error } = await supabase.auth.resetPasswordForEmail(email);
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Network error while sending reset link." };
+      return { success: false, error: "Network error while reaching auth server." };
     }
   };
 
@@ -137,11 +167,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    try { await supabase.auth.signOut(); } catch (e) {}
+    window.sessionStorage.removeItem('demo_mode');
+    window.sessionStorage.removeItem('demo_user');
+    setAuth({ user: null, isAuthenticated: false });
   };
 
   const refreshDeviceStatus = async () => {
-    setIsDeviceApproved(true);
+    await checkConnection();
   };
 
   return (
@@ -150,6 +183,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       connectionStatus,
       isDeviceApproved, 
       login, 
+      loginAsDemo,
       logout, 
       register, 
       forgotPassword, 
