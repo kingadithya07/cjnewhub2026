@@ -2,10 +2,9 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User, UserRole, AuthState } from '../../types';
 import { supabase } from '../../services/supabaseClient';
-import { getDeviceId, getDeviceName } from '../../utils/device';
 
 interface AuthContextType extends AuthState {
-  login: (email: string, password?: string) => Promise<{success: boolean, error?: string, isPendingDevice?: boolean}>;
+  login: (email: string, password?: string) => Promise<{success: boolean, error?: string}>;
   logout: () => void;
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
   forgotPassword: (email: string) => Promise<{success: boolean, error?: string}>;
@@ -21,12 +20,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     user: null,
     isAuthenticated: false,
   });
-  const [isDeviceApproved, setIsDeviceApproved] = useState(false);
-
-  const checkDeviceTrust = async (userId: string) => {
-    setIsDeviceApproved(true); 
-    return true;
-  };
+  const [isDeviceApproved, setIsDeviceApproved] = useState(true);
 
   const fetchUserProfile = async (userId: string, email: string) => {
     try {
@@ -37,12 +31,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           isAuthenticated: true
         });
       } else {
+        // Safe fallback for new projects without profile tables
         setAuth({
           user: { id: userId, name: email.split('@')[0], email: email, role: UserRole.READER },
           isAuthenticated: true
         });
       }
-      await checkDeviceTrust(userId);
     } catch (err) {
       setAuth({
         user: { id: userId, name: email.split('@')[0], email: email, role: UserRole.READER },
@@ -52,16 +46,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   useEffect(() => {
+    // Check initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) fetchUserProfile(session.user.id, session.user.email || '');
     });
 
+    // Listen for auth events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         fetchUserProfile(session.user.id, session.user.email || '');
       } else {
         setAuth({ user: null, isAuthenticated: false });
-        setIsDeviceApproved(false);
       }
     });
 
@@ -70,40 +65,42 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const login = async (email: string, password?: string) => {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password: password || '' });
+      const { error } = await supabase.auth.signInWithPassword({ email, password: password || '' });
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Network error. Please try again." };
+      return { success: false, error: "Connection error. Please ensure your Supabase project is not paused." };
     }
   };
 
   const register = async (name: string, email: string, password: string, role: UserRole) => {
     try {
-      // Simplified registration: we don't try to use options.data if it causes DB trigger failures
-      const { data, error } = await supabase.auth.signUp({
+      // Basic registration to avoid trigger conflicts
+      const { error } = await supabase.auth.signUp({
         email, 
         password,
         options: {
+          data: { name, role },
           emailRedirectTo: window.location.origin
         }
       });
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Network error or service unavailable." };
+      return { success: false, error: "Registration failed. Check network or Supabase status." };
     }
   };
 
   const forgotPassword = async (email: string) => {
     try {
+      // Use standard hash-based redirect for better compatibility with single-page apps
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/#/reset-password`
       });
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Failed to send recovery email." };
+      return { success: false, error: "Failed to send reset link. Try again later." };
     }
   };
 
@@ -113,7 +110,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (error) return { success: false, error: error.message };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Failed to update password." };
+      return { success: false, error: "Failed to update password. Session might have expired." };
     }
   };
 
@@ -122,7 +119,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const refreshDeviceStatus = async () => {
-    if (auth.user) await checkDeviceTrust(auth.user.id);
+    setIsDeviceApproved(true);
   };
 
   return (
