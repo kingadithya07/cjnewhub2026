@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { supabase } from '../services/supabaseClient';
-import { Lock, CheckCircle, AlertCircle, ShieldCheck, Loader2, ArrowLeft, Smartphone } from 'lucide-react';
+import { Lock, CheckCircle, AlertCircle, ShieldCheck, Loader2, ArrowLeft, RefreshCw, Smartphone } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
   const navigate = useNavigate();
@@ -14,55 +14,72 @@ export const ResetPassword: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
-  // State for the initial token exchange process
+  // State for the token exchange process
   const [verifyingLink, setVerifyingLink] = useState(true);
   const [sessionVerified, setSessionVerified] = useState(false);
 
   useEffect(() => {
     let mounted = true;
+    let pollInterval: NodeJS.Timeout;
 
-    const initializeReset = async () => {
-      // 1. Check if we already have a valid session (e.g., coming from email link)
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session) {
-        if (mounted) {
+    // This function runs an aggressive check to find the session "instantly"
+    // avoiding the wait for standard events if they are slow.
+    const aggressiveVerify = () => {
+      let attempts = 0;
+      // Check every 100ms (10 times per second) for a "no-wait" experience
+      pollInterval = setInterval(async () => {
+        if (!mounted) return;
+        
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session) {
+          clearInterval(pollInterval);
           setSessionVerified(true);
           setVerifyingLink(false);
+        } else {
+          attempts++;
+          // Stop after 5 seconds (50 attempts)
+          if (attempts > 50) {
+            clearInterval(pollInterval);
+            if (mounted) {
+               // Only mark as failed if we haven't verified yet
+               // This prevents overriding a success that happened elsewhere
+               setVerifyingLink((current) => {
+                 if (current) return false;
+                 return current;
+               });
+            }
+          }
         }
-        return;
-      }
-
-      // 2. If no session, check if we have the tokens in the URL to exchange
-      // Supabase handles the exchange automatically, we just need to wait for the event.
-      const hash = window.location.hash;
-      const hasToken = hash.includes('access_token') || hash.includes('type=recovery');
-
-      if (!hasToken) {
-        // No session and no token in URL -> Invalid Link immediately
-        if (mounted) {
-          setVerifyingLink(false);
-          setSessionVerified(false);
-        }
-      }
-      // If hasToken is true, we stay in verifiedLink=true and wait for onAuthStateChange
+      }, 100);
     };
 
-    // Listen for the magic link handshake
+    // 1. Initial Check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session && mounted) {
+        setSessionVerified(true);
+        setVerifyingLink(false);
+      } else {
+        // Start polling immediately if not found
+        aggressiveVerify();
+      }
+    });
+
+    // 2. Standard Event Listener (Backup)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
         if (mounted) {
+          clearInterval(pollInterval);
           setSessionVerified(true);
           setVerifyingLink(false);
         }
       }
     });
 
-    initializeReset();
-
     return () => { 
         mounted = false; 
         subscription.unsubscribe();
+        if (pollInterval) clearInterval(pollInterval);
     };
   }, []);
 
@@ -79,7 +96,7 @@ export const ResetPassword: React.FC = () => {
       if (result.success) {
         navigate('/auth-success?type=password-reset-success');
       } else {
-        setError(result.error || 'Failed to update password. Please try requesting a new link.');
+        setError(result.error || 'Failed to update password. Session may have expired.');
       }
     } catch (err) {
       setError('An unexpected error occurred.');
@@ -88,13 +105,19 @@ export const ResetPassword: React.FC = () => {
     }
   };
 
+  const handleManualRetry = () => {
+    setVerifyingLink(true);
+    setSessionVerified(false);
+    window.location.reload();
+  };
+
   if (verifyingLink) {
      return (
         <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
             <div className="bg-white p-8 rounded-2xl shadow-xl flex flex-col items-center max-w-sm w-full text-center animate-in fade-in zoom-in duration-300">
                 <Loader2 className="animate-spin text-[#b4a070] mb-4" size={48} />
                 <h2 className="text-xl font-bold text-gray-800">Securing Connection...</h2>
-                <p className="text-gray-500 text-sm mt-2">Validating your recovery token.</p>
+                <p className="text-gray-500 text-sm mt-2">Syncing authorities...</p>
             </div>
         </div>
      );
@@ -108,19 +131,17 @@ export const ResetPassword: React.FC = () => {
              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
                 <AlertCircle size={32} />
              </div>
-             <h2 className="text-2xl font-bold text-gray-900 mb-2">Link Expired or Invalid</h2>
+             <h2 className="text-2xl font-bold text-gray-900 mb-2">Link Invalid or Expired</h2>
              <p className="text-gray-500 mb-6 text-sm leading-relaxed">
-                We couldn't verify your secure session. This link may have already been used or expired.
+                We couldn't verify the security token. This happens if the link was already used or opened in a different browser.
              </p>
              
-             <div className="bg-gray-50 p-4 rounded-xl text-left text-xs text-gray-600 mb-6 border border-gray-100">
-                <p className="font-bold mb-1 flex items-center gap-1"><Smartphone size={12}/> troubleshooting:</p>
-                <ul className="list-disc pl-4 space-y-1">
-                   <li>Open the link in the <strong>same browser</strong> where you requested it.</li>
-                   <li>Check if you are already logged in elsewhere.</li>
-                   <li>Request a fresh link below.</li>
-                </ul>
-             </div>
+             <button 
+                onClick={handleManualRetry}
+                className="w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-colors mb-3 flex items-center justify-center gap-2"
+             >
+                <RefreshCw size={16} /> Force Retry
+             </button>
 
              <Link 
                 to="/login"
@@ -162,7 +183,7 @@ export const ResetPassword: React.FC = () => {
 
           <div className="mb-8 text-center">
              <p className="text-green-600 bg-green-50 p-3 rounded-lg text-sm font-bold border border-green-100 inline-flex items-center gap-2">
-                <CheckCircle size={16} /> Identity Verified
+                <CheckCircle size={16} /> Authorities Verified
              </p>
              <p className="text-gray-500 text-xs mt-3">Please set your new password below.</p>
           </div>
@@ -206,19 +227,7 @@ export const ResetPassword: React.FC = () => {
                 {!loading && <CheckCircle size={22} className="text-[#b4a070]" />}
               </button>
             </div>
-            
-            <div className="text-center pt-2">
-                <Link to="/login" className="inline-flex items-center gap-2 text-xs font-black text-gray-400 hover:text-indigo-600 uppercase tracking-widest transition-colors">
-                    <ArrowLeft size={14} /> Back to Sign In
-                </Link>
-            </div>
           </form>
-        </div>
-
-        <div className="p-6 bg-gray-50 text-center">
-            <h1 className="text-xl font-black tracking-tight text-gray-400" style={{ fontFamily: '"Playfair Display", serif' }}>
-                CJ<span className="text-[#b4a070]/50">NEWS</span>HUB
-            </h1>
         </div>
       </div>
     </div>

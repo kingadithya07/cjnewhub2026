@@ -31,7 +31,8 @@ const AuthListener = () => {
         // Only navigate if we aren't already there to prevent re-mounting the component
         // which kills the token exchange process.
         if (!location.pathname.includes('reset-password')) {
-           navigate('/reset-password');
+           // Use replace to avoid back button loops during recovery flow
+           navigate('/reset-password', { replace: true });
         }
       }
     });
