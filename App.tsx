@@ -25,13 +25,25 @@ const AuthListener = () => {
   const location = useLocation();
   
   useEffect(() => {
+    // 1. Immediate URL Check (Critical for redirection)
+    // If the user clicks a link with #type=recovery, we must show the ResetPassword page
+    // regardless of whether the Supabase event has fired yet.
+    const hash = window.location.hash;
+    if (hash && hash.includes('type=recovery')) {
+       if (!location.pathname.includes('reset-password')) {
+           // We explicitly keep the hash so Supabase can parse it on the destination page
+           // We strip the leading # because navigate adds it back if we use a relative path, 
+           // but with HashRouter we need to be careful.
+           // Since we are using HashRouter, window.location.hash might trigger weirdness.
+           // We simply navigate to the path. Supabase reads window.location.
+           navigate('/reset-password', { replace: true });
+       }
+    }
+
+    // 2. Supabase Event Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // Supabase redirect with HashRouter often clobbers the route.
       if (event === 'PASSWORD_RECOVERY') {
-        // Only navigate if we aren't already there to prevent re-mounting the component
-        // which kills the token exchange process.
         if (!location.pathname.includes('reset-password')) {
-           // Use replace to avoid back button loops during recovery flow
            navigate('/reset-password', { replace: true });
         }
       }

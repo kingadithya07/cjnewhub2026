@@ -22,6 +22,11 @@ export const ResetPassword: React.FC = () => {
     let mounted = true;
     let pollInterval: NodeJS.Timeout;
 
+    const checkHashPresence = () => {
+       const hash = window.location.hash;
+       return hash && (hash.includes('type=recovery') || hash.includes('access_token'));
+    };
+
     // This function runs an aggressive check to find the session "instantly"
     // avoiding the wait for standard events if they are slow.
     const aggressiveVerify = () => {
@@ -38,12 +43,15 @@ export const ResetPassword: React.FC = () => {
           setVerifyingLink(false);
         } else {
           attempts++;
-          // Stop after 5 seconds (50 attempts)
-          if (attempts > 50) {
+          // Extended timeout: 
+          // If the URL has a hash token, we wait longer (10 seconds / 100 attempts)
+          // If no hash, we give up sooner (3 seconds / 30 attempts)
+          const maxAttempts = checkHashPresence() ? 100 : 30;
+          
+          if (attempts > maxAttempts) {
             clearInterval(pollInterval);
             if (mounted) {
-               // Only mark as failed if we haven't verified yet
-               // This prevents overriding a success that happened elsewhere
+               // Only fail if we haven't verified yet
                setVerifyingLink((current) => {
                  if (current) return false;
                  return current;
@@ -108,6 +116,7 @@ export const ResetPassword: React.FC = () => {
   const handleManualRetry = () => {
     setVerifyingLink(true);
     setSessionVerified(false);
+    // Reloading forces Supabase to re-parse the URL hash
     window.location.reload();
   };
 
