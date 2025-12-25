@@ -1,5 +1,6 @@
 
 import React from 'react';
+// Fix: Ensure standard v6 imports
 import { useParams, useNavigate } from 'react-router-dom';
 import { MOCK_ARTICLES } from '../../services/mockData';
 import { ArrowLeft, Calendar, User, Tag } from 'lucide-react';

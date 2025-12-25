@@ -8,6 +8,7 @@ import {
   Megaphone, FileText, Scissors, Layout, Power, 
   Save, X, Star, Settings, MessageCircle, Shield, Smartphone, AlertTriangle, User as UserIcon, ExternalLink
 } from 'lucide-react';
+// Fix: Standard v6 imports
 import { useSearchParams } from 'react-router-dom';
 import { RichTextEditor } from '../components/RichTextEditor';
 import { ChatSystem } from '../modules/communication/ChatSystem';
@@ -77,8 +78,8 @@ export const Dashboard: React.FC = () => {
       content: newArticleData.content,
       category: newArticleData.category,
       thumbnail_url: newArticleData.thumbnailUrl,
-      is_featured: newArticleData.isFeatured,
-      is_trending: newArticleData.isTrending,
+      is_featured: newArticleData.is_featured,
+      is_trending: newArticleData.is_trending,
       author_id: user.id,
       author_name: user.name,
       author_avatar: user.avatar,

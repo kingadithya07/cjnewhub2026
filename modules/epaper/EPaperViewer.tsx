@@ -3,7 +3,8 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import Cropper, { ReactCropperElement } from 'react-cropper';
 import { Download, Scissors, X, Check, Eye, FileText, MousePointerClick, Save, Maximize, ArrowLeft, Move, Minimize2, Settings, Type, Image as ImageIcon, Calendar, Grid, Share2 } from 'lucide-react';
 import { EPaperPage, CropRegion, UserRole } from '../../types';
-import { MOCK_ARTICLES, MOCK_SETTINGS } from '../../services/mockData';
+import { MOCK_SETTINGS } from '../../services/mockData';
+// Fix: Standard v6 imports
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
@@ -41,14 +42,20 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
   const [selectedRegion, setSelectedRegion] = useState<CropRegion | null>(null);
   const [generatedClip, setGeneratedClip] = useState<string | null>(null);
   const [isCropping, setIsCropping] = useState(false);
-  const [cropperDragMode, setCropperDragMode] = useState<'move' | 'none'>('none');
+  const [cropperDragMode, setCropperDragMode] = useState<'none' | 'move'>('none');
   
   const wmText = MOCK_SETTINGS.watermark.text;
-  const wmScale = 2; // Fixed high quality scale
   const wmShowDate = MOCK_SETTINGS.watermark.showDate;
   
   const cropperRef = useRef<ReactCropperElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+
+  // Fix: Handle dragMode change via instance method to avoid TS prop errors
+  useEffect(() => {
+    if (cropperRef.current?.cropper) {
+      cropperRef.current.cropper.setDragMode(cropperDragMode);
+    }
+  }, [cropperDragMode]);
 
   const isEditor = user && [UserRole.ADMIN, UserRole.EDITOR, UserRole.PUBLISHER].includes(user.role);
 
@@ -74,6 +81,23 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
       return '';
     }
 
+    // Add Repeating Watermark Pattern on top of image
+    ctx.save();
+    ctx.translate(w/2, h/2);
+    ctx.rotate(-Math.PI / 6);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(180, 160, 112, 0.15)'; // Subtle Gold
+    ctx.font = 'bold 24px sans-serif';
+    
+    const stepX = 200;
+    const stepY = 100;
+    for (let i = -w; i < w; i += stepX) {
+      for (let j = -h; j < h; j += stepY) {
+        ctx.fillText(wmText || "CJNEWS HUB", i, j);
+      }
+    }
+    ctx.restore();
+
     // Black footer
     ctx.fillStyle = '#000000'; 
     ctx.fillRect(0, h, canvas.width, footerHeight);
@@ -89,7 +113,7 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
     if (wmShowDate) {
         ctx.font = '16px sans-serif';
         ctx.fillStyle = '#ffffff';
-        const dateText = `EDITION: ${activePage?.date} | PAGE: ${activePage?.pageNumber}`;
+        const dateText = `EDITION: ${activePage?.date || selectedDate} | PAGE: ${activePage?.pageNumber || 'CLIP'}`;
         const dateWidth = ctx.measureText(dateText).width;
         ctx.fillText(dateText, canvas.width - dateWidth - padding, textY);
     }
@@ -97,7 +121,7 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
     // Small attribution
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.font = '12px sans-serif';
-    ctx.fillText('CLIPPED VIA NEWSFLOW DIGITAL SERVICES', padding, textY + 30);
+    ctx.fillText('CLIPPED VIA NEWSFLOW DIGITAL SERVICES • PROOF OF AUTHENTICITY', padding, textY + 30);
 
     return canvas.toDataURL('image/jpeg', 0.9);
   };
@@ -249,7 +273,6 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
                src={activePage.imageUrl}
                style={{ height: '100%', width: '100%' }}
                ref={cropperRef}
-               dragMode={cropperDragMode}
                viewMode={1}
                guides={true}
                responsive={true}
@@ -282,7 +305,7 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
                   
                   <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
                      <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">Clipper Logic</p>
-                     <p className="text-xs text-gray-600 leading-relaxed">High-resolution clipping with NewsFlow Hub watermark and authenticity stamp.</p>
+                     <p className="text-xs text-gray-600 leading-relaxed">High-resolution clipping with CJNews Hub watermark and authenticity stamp.</p>
                   </div>
                </div>
 

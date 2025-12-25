@@ -1,4 +1,6 @@
+
 import React, { useMemo } from 'react';
+// Fix: Ensure standard v6 imports
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './modules/auth/AuthContext';
 import { Layout } from './components/Layout';

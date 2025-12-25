@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Article } from '../types';
 import { ChevronLeft, ChevronRight, Star } from 'lucide-react';
+// Fix: Ensure standard v6 imports
 import { useNavigate } from 'react-router-dom';
 
 interface HeroSliderProps {
