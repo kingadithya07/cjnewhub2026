@@ -1,12 +1,11 @@
-
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User, UserRole, AuthState } from '../../types';
 import { supabase } from '../../services/supabaseClient';
 
 interface AuthContextType extends AuthState {
-  login: (email: string, password?: string) => Promise<boolean>;
+  login: (email: string, password?: string) => Promise<{success: boolean, error?: string}>;
   logout: () => void;
-  register: (name: string, email: string, password: string, role: UserRole) => Promise<boolean>;
+  register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
   forgotPassword: (email: string) => Promise<boolean>;
 }
 
@@ -36,6 +35,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         },
         isAuthenticated: true
       });
+    } else {
+        // Fallback to basic auth user info if profile isn't ready yet (trigger lag)
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            setAuth({
+                user: {
+                    id: user.id,
+                    name: user.user_metadata?.name || user.email || 'User',
+                    email: user.email || '',
+                    role: (user.user_metadata?.role as UserRole) || UserRole.READER,
+                },
+                isAuthenticated: true
+            });
+        }
     }
   };
 
@@ -57,21 +70,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => subscription.unsubscribe();
   }, []);
 
-  const login = async (email: string, password?: string): Promise<boolean> => {
-    if (!password) return false;
+  const login = async (email: string, password?: string): Promise<{success: boolean, error?: string}> => {
+    if (!password) return { success: false, error: "Password required" };
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return !error;
+    if (error) return { success: false, error: error.message };
+    return { success: true };
   };
 
-  const register = async (name: string, email: string, password: string, role: UserRole): Promise<boolean> => {
-    const { error } = await supabase.auth.signUp({
+  const register = async (name: string, email: string, password: string, role: UserRole): Promise<{success: boolean, error?: string}> => {
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { name, role } // Metadata used by the SQL trigger
+        data: { name, role }, // Role passed to SQL trigger
+        emailRedirectTo: window.location.origin
       }
     });
-    return !error;
+    
+    if (error) return { success: false, error: error.message };
+    
+    // If auto-confirm is on, we'll have a user session
+    if (data.user) {
+        await fetchUserProfile(data.user.id);
+    }
+    
+    return { success: true };
   };
 
   const forgotPassword = async (email: string): Promise<boolean> => {

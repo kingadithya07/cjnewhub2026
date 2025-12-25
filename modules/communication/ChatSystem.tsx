@@ -96,6 +96,7 @@ export const ChatSystem: React.FC = () => {
   const handleSendChatMessage = (attachments: Attachment[] = []) => {
     if ((!chatInputText.trim() && attachments.length === 0) || !user) return;
 
+    // Fix: Adding required property 'isSystem' to the Message object.
     const newMessage: Message = {
       id: `msg-${Date.now()}`,
       channel: activeChannel,
@@ -106,6 +107,7 @@ export const ChatSystem: React.FC = () => {
       content: chatInputText.trim(),
       attachments: attachments,
       createdAt: new Date().toISOString(),
+      isSystem: false,
     };
 
     const updatedMessages = [...messages, newMessage];
