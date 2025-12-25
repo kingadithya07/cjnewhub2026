@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User, UserRole, AuthState } from '../../types';
 import { supabase } from '../../services/supabaseClient';
@@ -9,8 +8,6 @@ interface AuthContextType extends AuthState {
   logout: () => void;
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
   forgotPassword: (email: string) => Promise<boolean>;
-  updatePassword: (newPassword: string) => Promise<{success: boolean, error?: string}>;
-  verifyOTP: (email: string, token: string, type: 'signup' | 'recovery') => Promise<{success: boolean, error?: string}>;
   isDeviceApproved: boolean;
   refreshDeviceStatus: () => Promise<void>;
 }
@@ -24,10 +21,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
   const [isDeviceApproved, setIsDeviceApproved] = useState(false);
 
-  const getRedirectUrl = () => {
-    return window.location.origin;
-  };
-
   const checkDeviceTrust = async (userId: string) => {
     const currentDeviceId = getDeviceId();
     
@@ -38,6 +31,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (error) return false;
 
+    // If this is the user's first device ever
     if (devices.length === 0) {
       const { error: insertError } = await supabase
         .from('trusted_devices')
@@ -53,11 +47,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return true;
     }
 
+    // Check if current device is in the list
     const currentDevice = devices.find(d => d.device_id === currentDeviceId);
     
     if (currentDevice) {
       if (currentDevice.status === 'APPROVED') {
         setIsDeviceApproved(true);
+        // Update last active
         await supabase.from('trusted_devices').update({ last_active: new Date().toISOString() }).eq('id', currentDevice.id);
         return true;
       } else {
@@ -65,7 +61,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return false;
       }
     } else {
+      // New device detected - Create approval request
       setIsDeviceApproved(false);
+      
+      // Register this device as pending
       await supabase.from('trusted_devices').insert({
         profile_id: userId,
         device_id: currentDeviceId,
@@ -73,12 +72,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         is_primary: false,
         status: 'PENDING'
       });
+
+      // Create a security request for the primary device to see
       await supabase.from('security_requests').insert({
         profile_id: userId,
         request_type: 'DEVICE_ADD',
         details: { device_id: currentDeviceId, device_name: getDeviceName() },
         requested_from_device: currentDeviceId
       });
+
       return false;
     }
   };
@@ -101,13 +103,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (session?.user) fetchUserProfile(session.user.id);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user) {
-        fetchUserProfile(session.user.id);
-      } else {
-        setAuth({ user: null, isAuthenticated: false });
-        setIsDeviceApproved(false);
-      }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) fetchUserProfile(session.user.id);
+      else { setAuth({ user: null, isAuthenticated: false }); setIsDeviceApproved(false); }
     });
 
     return () => subscription.unsubscribe();
@@ -127,22 +125,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const register = async (name: string, email: string, password: string, role: UserRole) => {
     const { data, error } = await supabase.auth.signUp({
-      email, 
-      password, 
-      options: { 
-        data: { name, role },
-        emailRedirectTo: getRedirectUrl()
-      }
-    });
-    if (error) return { success: false, error: error.message };
-    return { success: true };
-  };
-
-  const verifyOTP = async (email: string, token: string, type: 'signup' | 'recovery') => {
-    const { data, error } = await supabase.auth.verifyOtp({
-      email,
-      token,
-      type: type === 'signup' ? 'signup' : 'recovery'
+      email, password, options: { data: { name, role }, emailRedirectTo: window.location.origin }
     });
     if (error) return { success: false, error: error.message };
     return { success: true };
@@ -159,23 +142,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const forgotPassword = async (email: string) => {
-    // Redirect explicitly to the ResetPassword page so the user sees the OTP entry screen
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${getRedirectUrl()}/#/reset-password?email=${encodeURIComponent(email)}`,
-    });
+    // Note: Per user request, password reset/forgot should ideally go through approval
+    // but standard supabase sends email. We will add the approval layer in the profile edit UI.
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
     return !error;
   };
 
-  const updatePassword = async (newPassword: string) => {
-    const { data, error } = await supabase.auth.updateUser({
-      password: newPassword
-    });
-    if (error) return { success: false, error: error.message };
-    return { success: true };
-  };
-
   return (
-    <AuthContext.Provider value={{ ...auth, isDeviceApproved, login, logout, register, forgotPassword, updatePassword, refreshDeviceStatus, verifyOTP }}>
+    <AuthContext.Provider value={{ ...auth, isDeviceApproved, login, logout, register, forgotPassword, refreshDeviceStatus }}>
       {children}
     </AuthContext.Provider>
   );

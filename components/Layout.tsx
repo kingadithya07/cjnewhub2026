@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../modules/auth/AuthContext';
-// Fix: Ensure standard react-router-dom v6 imports
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Menu, X, Search, LogOut, LayoutDashboard,

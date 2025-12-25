@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './modules/auth/AuthContext';
@@ -9,14 +8,10 @@ import { EPaperViewer } from './modules/epaper/EPaperViewer';
 import { Dashboard } from './pages/Dashboard';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
-import { VerifyOTP } from './pages/VerifyOTP';
-import { AuthAction } from './pages/AuthAction';
-import { UpdatePassword } from './pages/UpdatePassword';
-import { ResetPassword } from './pages/ResetPassword';
 import { HeroSlider } from './components/HeroSlider';
 import { supabase } from './services/supabaseClient';
 import { Article, UserRole, EPaperPage, Classified } from './types';
-import { Store, Newspaper, TrendingUp, MapPin, DollarSign, Loader2 } from 'lucide-react';
+import { Store, Newspaper, TrendingUp, MapPin, DollarSign } from 'lucide-react';
 
 const ProtectedRoute = ({ children, roles }: { children?: React.ReactNode, roles?: UserRole[] }) => {
   const { user, isAuthenticated } = useAuth();
@@ -35,53 +30,31 @@ const Home: React.FC = () => {
   useEffect(() => {
     const loadHomeData = async () => {
       setLoading(true);
-      try {
-        const { data: art, error: artError } = await supabase
-          .from('articles')
-          .select('*')
-          .eq('status', 'PUBLISHED')
-          .order('created_at', { ascending: false });
-        
-        if (art) {
-          setArticles(art.map(a => ({
-            id: a.id,
-            title: a.title,
-            summary: a.summary,
-            content: a.content,
-            authorId: a.author_id,
-            authorName: a.author_name,
-            authorAvatar: a.author_avatar,
-            status: a.status,
-            category: a.category,
-            thumbnailUrl: a.thumbnail_url,
-            isFeatured: a.is_featured,
-            isTrending: a.is_trending,
-            createdAt: a.created_at
-          })));
-        }
-
-        const { data: cls } = await supabase
-          .from('classifieds')
-          .select('*')
-          .eq('status', 'ACTIVE')
-          .order('created_at', { ascending: false });
-        
-        if (cls) setClassifieds(cls.map(c => ({
-          id: c.id,
-          title: c.title,
-          content: c.content,
-          location: c.location,
-          price: c.price,
-          contact: c.contact,
-          category: c.category || 'General',
-          createdAt: c.created_at,
-          status: c.status
+      const { data: art } = await supabase
+        .from('articles')
+        .select('*')
+        .eq('status', 'PUBLISHED')
+        .order('created_at', { ascending: false });
+      
+      if (art) {
+        setArticles(art.map(a => ({
+          ...a,
+          createdAt: a.created_at,
+          authorName: a.author_name,
+          thumbnailUrl: a.thumbnail_url,
+          isFeatured: a.is_featured,
+          isTrending: a.is_trending
         })));
-      } catch (err) {
-        console.error("Home data fetch error:", err);
-      } finally {
-        setLoading(false);
       }
+
+      const { data: cls } = await supabase
+        .from('classifieds')
+        .select('*')
+        .eq('status', 'ACTIVE')
+        .order('created_at', { ascending: false });
+      
+      if (cls) setClassifieds(cls.map(c => ({ ...c, createdAt: c.created_at })));
+      setLoading(false);
     };
 
     loadHomeData();
@@ -93,12 +66,7 @@ const Home: React.FC = () => {
   const featuredArticles = useMemo(() => articles.filter(a => a.isFeatured).slice(0, 5), [articles]);
   const trendingArticles = useMemo(() => articles.filter(a => a.isTrending).slice(0, 5), [articles]);
 
-  if (loading) return (
-    <div className="flex flex-col items-center justify-center py-32 space-y-4">
-      <Loader2 className="animate-spin text-indigo-600" size={48} />
-      <p className="font-bold text-gray-500 tracking-widest uppercase text-xs">Fetching Latest Edition...</p>
-    </div>
-  );
+  if (loading) return <div className="py-20 text-center font-bold text-gray-400">Loading Latest News...</div>;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -182,29 +150,10 @@ const Home: React.FC = () => {
 
 const App: React.FC = () => {
   const [epaperPages, setEpaperPages] = useState<EPaperPage[]>([]);
-  const [loading, setLoading] = useState(true);
-
   useEffect(() => {
-    const fetchEPaper = async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('epaper_pages')
-        .select('*')
-        .order('date', { ascending: false })
-        .order('page_number', { ascending: true });
-      
-      if (data) {
-        setEpaperPages(data.map(p => ({
-          id: p.id,
-          date: p.date,
-          pageNumber: p.page_number,
-          imageUrl: p.image_url,
-          regions: p.regions || []
-        })));
-      }
-      setLoading(false);
-    };
-    fetchEPaper();
+    supabase.from('epaper_pages').select('*').then(({ data }) => {
+      if (data) setEpaperPages(data.map(p => ({ ...p, pageNumber: p.page_number, imageUrl: p.image_url })));
+    });
   }, []);
 
   return (
@@ -213,10 +162,6 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/verify-otp" element={<VerifyOTP />} />
-          <Route path="/update-password" element={<UpdatePassword />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/auth-success" element={<AuthAction />} />
           <Route path="/" element={<Layout><Home /></Layout>} />
           <Route path="/articles/:id" element={<Layout><ArticleDetail /></Layout>} />
           <Route path="/epaper" element={<Layout><EPaperViewer pages={epaperPages} /></Layout>} />

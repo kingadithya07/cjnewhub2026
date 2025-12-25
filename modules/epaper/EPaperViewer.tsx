@@ -1,10 +1,8 @@
-
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import Cropper, { ReactCropperElement } from 'react-cropper';
-import { Download, Scissors, X, Check, Eye, FileText, MousePointerClick, Save, Maximize, ArrowLeft, Move, Minimize2, Settings, Type, Image as ImageIcon, Calendar, Grid, Share2 } from 'lucide-react';
+import { Download, Scissors, X, Check, Eye, FileText, MousePointerClick, Save, Maximize, ArrowLeft, Move, Minimize2, Settings, Type, Image as ImageIcon, Calendar, Grid } from 'lucide-react';
 import { EPaperPage, CropRegion, UserRole } from '../../types';
-import { MOCK_SETTINGS } from '../../services/mockData';
-// Fix: Standard v6 imports
+import { MOCK_ARTICLES, MOCK_SETTINGS } from '../../services/mockData';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
@@ -42,31 +40,32 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
   const [selectedRegion, setSelectedRegion] = useState<CropRegion | null>(null);
   const [generatedClip, setGeneratedClip] = useState<string | null>(null);
   const [isCropping, setIsCropping] = useState(false);
-  const [cropperDragMode, setCropperDragMode] = useState<'none' | 'move'>('none');
-  
+  const [cropperDragMode, setCropperDragMode] = useState<'move' | 'none'>('none');
+  const [newRegionData, setNewRegionData] = useState<{title: string, articleId: string}>({ title: '', articleId: '' });
+
   const wmText = MOCK_SETTINGS.watermark.text;
+  const wmImgUrl = MOCK_SETTINGS.watermark.imageUrl;
+  const wmScale = MOCK_SETTINGS.watermark.scale;
   const wmShowDate = MOCK_SETTINGS.watermark.showDate;
   
   const cropperRef = useRef<ReactCropperElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
 
-  // Fix: In Cropper v2, dragMode is handled via property or state update rather than setDragMode method. Bypass type mismatch.
-  useEffect(() => {
-    if (cropperRef.current?.cropper) {
-      const cropperInstance = cropperRef.current.cropper as any;
-      if (typeof cropperInstance.setDragMode === 'function') {
-        cropperInstance.setDragMode(cropperDragMode);
-      } else {
-        // Fallback for v2 property-based drag mode
-        cropperInstance.dragMode = cropperDragMode;
-      }
-    }
-  }, [cropperDragMode]);
-
   const isEditor = user && [UserRole.ADMIN, UserRole.EDITOR, UserRole.PUBLISHER].includes(user.role);
+  
+  const loadImage = (url: string): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = url;
+    });
+  };
 
   const generateWatermarkedImage = async (sourceImage: HTMLImageElement, x: number, y: number, w: number, h: number): Promise<string> => {
-    const footerHeight = 120;
+    const scale = wmScale || 1.5;
+    const footerHeight = 70 * scale;
     
     const canvas = document.createElement('canvas');
     canvas.width = w;
@@ -75,11 +74,9 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return '';
 
-    // White background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw the crop
     try {
       ctx.drawImage(sourceImage, x, y, w, h, 0, 0, w, h);
     } catch (e) {
@@ -87,47 +84,23 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
       return '';
     }
 
-    // Add Repeating Watermark Pattern on top of image
-    ctx.save();
-    ctx.translate(w/2, h/2);
-    ctx.rotate(-Math.PI / 6);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(180, 160, 112, 0.15)'; // Subtle Gold
-    ctx.font = 'bold 24px sans-serif';
-    
-    const stepX = 200;
-    const stepY = 100;
-    for (let i = -w; i < w; i += stepX) {
-      for (let j = -h; j < h; j += stepY) {
-        ctx.fillText(wmText || "CJNEWS HUB", i, j);
-      }
-    }
-    ctx.restore();
-
-    // Black footer
-    ctx.fillStyle = '#000000'; 
+    ctx.fillStyle = '#111827'; 
     ctx.fillRect(0, h, canvas.width, footerHeight);
 
-    const padding = 40;
-    const textY = h + 70;
+    const padding = 25 * scale;
+    const textY = h + (40 * scale);
     
-    // Watermark Logo/Text
-    ctx.fillStyle = '#b4a070';
-    ctx.font = 'bold 32px "Playfair Display", serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${18 * scale}px "Playfair Display", serif`;
     ctx.fillText(wmText || "CJNEWS HUB", padding, textY);
 
     if (wmShowDate) {
-        ctx.font = '16px sans-serif';
-        ctx.fillStyle = '#ffffff';
-        const dateText = `EDITION: ${activePage?.date || selectedDate} | PAGE: ${activePage?.pageNumber || 'CLIP'}`;
+        ctx.font = `${14 * scale}px sans-serif`;
+        ctx.fillStyle = '#94a3b8';
+        const dateText = `CLIPPED FROM THE EDITION OF ${activePage?.date}`;
         const dateWidth = ctx.measureText(dateText).width;
         ctx.fillText(dateText, canvas.width - dateWidth - padding, textY);
     }
-
-    // Small attribution
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.font = '12px sans-serif';
-    ctx.fillText('CLIPPED VIA NEWSFLOW DIGITAL SERVICES • PROOF OF AUTHENTICITY', padding, textY + 30);
 
     return canvas.toDataURL('image/jpeg', 0.9);
   };
@@ -152,13 +125,9 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
   };
 
   const handleManualCrop = async () => {
-    const cropper = cropperRef.current?.cropper as any;
+    const cropper = cropperRef.current?.cropper;
     if (cropper) {
-      // Fix: Use getCropperCanvas for Cropper.js v2 compatibility, fall back to getCroppedCanvas for v1.
-      const canvas = typeof cropper.getCropperCanvas === 'function' 
-        ? cropper.getCropperCanvas() 
-        : cropper.getCroppedCanvas({ imageSmoothingQuality: 'high' });
-        
+      const canvas = cropper.getCroppedCanvas({ imageSmoothingQuality: 'high' });
       if (!canvas) return;
       
       const tempImg = new Image();
@@ -176,92 +145,72 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
 
   if (!activePage) {
     return (
-      <div className="space-y-6 animate-in fade-in duration-500">
-         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row justify-between items-center gap-4">
-            <div>
-               <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                 <Grid size={24} className="text-[#b4a070]" />
-                 Digital Archives
-               </h3>
-               <p className="text-sm text-gray-500">Select an edition to start reading</p>
-            </div>
-            <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg border">
-               <Calendar size={18} className="text-gray-400" />
-               <input 
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="bg-transparent border-none text-gray-800 text-sm font-bold outline-none"
-                />
-            </div>
+      <div className="space-y-6">
+         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center">
+            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <Grid size={24} className="text-[#b4a070]" />
+              Digital Editions
+            </h3>
+            <input 
+               type="date"
+               value={selectedDate}
+               onChange={(e) => setSelectedDate(e.target.value)}
+               className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-[#b4a070]"
+             />
          </div>
          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-6">
             {editionPages.map((page) => (
                <div 
                  key={page.id}
                  onClick={() => navigate(`/epaper?pageId=${page.id}`)}
-                 className="group cursor-pointer flex flex-col gap-2"
+                 className="group cursor-pointer bg-white rounded-lg shadow-sm overflow-hidden border border-gray-200 hover:shadow-xl transition-all"
                >
-                  <div className="aspect-[3/4] relative overflow-hidden rounded-xl shadow-md group-hover:shadow-2xl transition-all border border-gray-200">
-                     <img src={page.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity p-4 text-center">
-                        <span className="bg-[#b4a070] text-black px-4 py-2 rounded-full font-bold text-xs uppercase tracking-widest mb-2">Read Edition</span>
-                        <p className="text-white text-[10px] font-bold">PAGE {page.pageNumber}</p>
+                  <div className="aspect-[3/4] relative overflow-hidden">
+                     <img src={page.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                        <span className="bg-white text-black px-4 py-2 rounded-full font-bold text-sm">Read Page {page.pageNumber}</span>
                      </div>
-                  </div>
-                  <div className="px-1">
-                     <p className="font-bold text-gray-800 text-sm">Page {page.pageNumber}</p>
-                     <p className="text-xs text-gray-400 uppercase tracking-tighter">{new Date(page.date).toLocaleDateString()}</p>
                   </div>
                </div>
             ))}
-            {editionPages.length === 0 && (
-               <div className="col-span-full py-20 text-center bg-white rounded-2xl border border-dashed border-gray-300 text-gray-400 font-bold">
-                  No editions found for this date.
-               </div>
-            )}
          </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-300">
-      <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center sticky top-14 md:top-28 z-30">
-        <button onClick={() => navigate('/epaper')} className="flex items-center gap-2 text-gray-500 hover:text-black font-bold text-sm transition-colors">
-           <ArrowLeft size={18} /> <span className="hidden sm:inline">BACK TO EDITIONS</span>
+    <div className="space-y-4">
+      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex justify-between items-center">
+        <button onClick={() => navigate('/epaper')} className="flex items-center gap-2 text-gray-500 hover:text-black font-bold text-sm">
+           <ArrowLeft size={18} /> BACK TO EDITIONS
         </button>
         <div className="flex gap-2">
           {isEditor && (
-            <button onClick={() => setViewMode(viewMode === 'READ' ? 'EDIT' : 'READ')} className={`p-2 rounded-lg transition-colors ${viewMode === 'EDIT' ? 'bg-[#b4a070] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+            <button onClick={() => setViewMode(viewMode === 'READ' ? 'EDIT' : 'READ')} className="bg-gray-100 hover:bg-gray-200 p-2 rounded-lg text-gray-700">
                <Settings size={20} />
             </button>
           )}
-          <button onClick={() => setIsCropping(true)} className="bg-black text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-gray-900 transition-colors shadow-lg">
-            <Scissors size={18} className="text-[#b4a070]" /> CLIP & SHARE
+          <button onClick={() => setIsCropping(true)} className="bg-[#b4a070] text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2">
+            <Scissors size={18} /> CLIP ARTICLE
           </button>
         </div>
       </div>
 
-      <div className="bg-slate-800 p-4 md:p-12 rounded-2xl flex justify-center shadow-inner relative min-h-[80vh] overflow-hidden">
-         <div className="relative shadow-2xl bg-white max-w-full h-fit border-[12px] border-white rounded-sm overflow-hidden">
+      <div className="bg-slate-200 p-8 rounded-xl flex justify-center shadow-inner relative min-h-[70vh]">
+         <div className="relative shadow-2xl bg-white max-w-full">
             <img 
               ref={imageRef}
               src={activePage.imageUrl} 
-              className="max-h-[90vh] md:max-h-[120vh] w-auto block"
+              className="max-h-[85vh] w-auto block"
               crossOrigin="anonymous"
             />
             {viewMode === 'READ' && activePage.regions?.map((region) => (
                <div
                  key={region.id}
                  onClick={() => handleRegionClick(region)}
-                 className="absolute border-2 border-transparent hover:border-[#b4a070] hover:bg-[#b4a070]/5 cursor-pointer transition-all group"
+                 className="absolute border-2 border-transparent hover:border-[#b4a070] hover:bg-[#b4a070]/10 cursor-pointer transition-all"
                  style={{ left: `${region.x}%`, top: `${region.y}%`, width: `${region.width}%`, height: `${region.height}%` }}
-               >
-                  <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                     <div className="bg-[#b4a070] text-black text-[10px] font-bold px-2 py-1 rounded shadow-lg uppercase tracking-widest">{region.title}</div>
-                  </div>
-               </div>
+               />
             ))}
          </div>
       </div>
@@ -269,72 +218,46 @@ export const EPaperViewer: React.FC<EPaperViewerProps> = ({ pages }) => {
       {isCropping && (
         <div className="fixed inset-0 z-50 bg-black flex flex-col animate-in fade-in duration-300">
           <div className="bg-zinc-900 p-4 border-b border-zinc-800 flex justify-between items-center text-white">
-            <button onClick={() => setIsCropping(false)} className="flex items-center gap-2 text-zinc-400 hover:text-white font-bold">
-               <X size={24} /> Close
+            <button onClick={() => setIsCropping(false)} className="flex items-center gap-2 text-zinc-400 hover:text-white">
+               <ArrowLeft size={20} /> Cancel
             </button>
             <div className="flex gap-4">
-               <button onClick={() => setCropperDragMode('none')} className={`p-2 rounded-lg transition-colors ${cropperDragMode === 'none' ? 'bg-[#b4a070] text-black' : 'bg-zinc-800 text-zinc-400'}`}><Minimize2 size={20} /></button>
-               <button onClick={() => setCropperDragMode('move')} className={`p-2 rounded-lg transition-colors ${cropperDragMode === 'move' ? 'bg-[#b4a070] text-black' : 'bg-zinc-800 text-zinc-400'}`}><Move size={20} /></button>
+               <button onClick={() => setCropperDragMode('none')} className={`p-2 rounded ${cropperDragMode === 'none' ? 'bg-[#b4a070]' : 'bg-zinc-800'}`}><Minimize2 size={18} /></button>
+               <button onClick={() => setCropperDragMode('move')} className={`p-2 rounded ${cropperDragMode === 'move' ? 'bg-[#b4a070]' : 'bg-zinc-800'}`}><Move size={18} /></button>
             </div>
-            <button onClick={handleManualCrop} className="bg-white text-black px-6 py-2 rounded-full font-bold shadow-xl active:scale-95 transition-transform">WATERMARK CLIP</button>
+            <button onClick={handleManualCrop} className="bg-white text-black px-6 py-2 rounded-full font-bold">CROP & WATERMARK</button>
           </div>
-          <div className="flex-1 overflow-hidden bg-black/50">
-            {/* Fix: Bypass property mismatch for v2 by using a spread with any cast for options that are missing in types in this environment. */}
+          <div className="flex-1 overflow-hidden">
             <Cropper
                src={activePage.imageUrl}
                style={{ height: '100%', width: '100%' }}
                ref={cropperRef}
-               {...({
-                 viewMode: 1,
-                 guides: true,
-                 responsive: true,
-                 checkOrientation: false,
-                 background: false
-               } as any)}
+               dragMode={cropperDragMode}
+               viewMode={1}
                crossOrigin="anonymous"
+               background={false}
             />
           </div>
         </div>
       )}
 
       {selectedRegion && generatedClip && (
-        <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4 md:p-10 backdrop-blur-xl animate-in fade-in duration-300">
-          <div className="bg-white rounded-3xl max-w-4xl w-full overflow-hidden shadow-2xl flex flex-col md:flex-row h-full max-h-[90vh]">
-            <div className="flex-1 bg-gray-200 flex items-center justify-center p-4 overflow-hidden">
-               <img src={generatedClip} className="max-h-full max-w-full shadow-2xl object-contain rounded" />
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-4 border-b flex justify-between items-center">
+               <h3 className="font-bold text-gray-800">Preview & Download</h3>
+               <button onClick={() => { setSelectedRegion(null); setGeneratedClip(null); }} className="p-2 hover:bg-gray-100 rounded-full"><X size={20} /></button>
             </div>
-            <div className="w-full md:w-80 p-8 flex flex-col border-l border-gray-100 bg-white">
-               <div className="flex justify-between items-center mb-8">
-                  <h3 className="text-2xl font-black text-gray-900" style={{ fontFamily: '"Playfair Display", serif' }}>PREVIEW</h3>
-                  <button onClick={() => { setSelectedRegion(null); setGeneratedClip(null); }} className="p-2 hover:bg-gray-100 rounded-full"><X size={24} /></button>
-               </div>
-               
-               <div className="space-y-6 flex-1">
-                  <div>
-                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-2">Edition Details</p>
-                     <p className="text-sm font-bold text-gray-800">{activePage.date}</p>
-                     <p className="text-xs text-gray-500">Page {activePage.pageNumber}</p>
-                  </div>
-                  
-                  <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                     <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">Clipper Logic</p>
-                     <p className="text-xs text-gray-600 leading-relaxed">High-resolution clipping with CJNews Hub watermark and authenticity stamp.</p>
-                  </div>
-               </div>
-
-               <div className="space-y-3 pt-6">
-                  <a href={generatedClip} download={`news_clip_${activePage.date}.jpg`} className="w-full bg-[#111827] text-white px-8 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg hover:bg-black transition-all active:scale-95">
-                     <Download size={20} className="text-[#b4a070]" /> Download JPG
-                  </a>
-                  {selectedRegion.linkedArticleId && (
-                     <button onClick={() => navigate(`/articles/${selectedRegion.linkedArticleId}`)} className="w-full bg-white border-2 border-gray-200 text-gray-900 px-8 py-4 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-gray-50 transition-all">
-                        <FileText size={20} className="text-[#b4a070]" /> Read Article
-                     </button>
-                  )}
-                  <button className="w-full flex items-center justify-center gap-2 text-xs font-bold text-gray-400 hover:text-indigo-600 uppercase tracking-widest py-2 transition-colors">
-                     <Share2 size={14} /> Social Share
-                  </button>
-               </div>
+            <div className="flex-1 p-8 bg-gray-100 overflow-y-auto flex justify-center">
+               <img src={generatedClip} className="shadow-xl max-h-[60vh] object-contain" />
+            </div>
+            <div className="p-6 border-t flex justify-end gap-4">
+               <a href={generatedClip} download="news_clip.jpg" className="bg-black text-white px-8 py-3 rounded-xl font-bold flex items-center gap-2">
+                  <Download size={20} /> Download Clip
+               </a>
+               {selectedRegion.linkedArticleId && (
+                  <button onClick={() => navigate(`/articles/${selectedRegion.linkedArticleId}`)} className="bg-[#b4a070] text-white px-8 py-3 rounded-xl font-bold">Read Full Article</button>
+               )}
             </div>
           </div>
         </div>
