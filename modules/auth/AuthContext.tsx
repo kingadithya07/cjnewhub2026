@@ -4,15 +4,19 @@ import { User, UserRole, AuthState } from '../../types';
 import { supabase, supabaseUrl } from '../../services/supabaseClient';
 import { MOCK_USERS } from '../../services/mockData';
 
+// Added missing properties to AuthContextType to satisfy usage in Dashboard and the provider itself
 interface AuthContextType extends AuthState {
-  login: (email: string, password?: string) => Promise<{success: boolean, error?: string}>;
+  login: (email: string, password?: string) => Promise<{success: boolean, error?: string, requiresVerification?: boolean}>;
   loginAsDemo: (role?: UserRole) => void;
   logout: () => void;
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
-  forgotPassword: (email: string) => Promise<{success: boolean, error?: string}>;
-  updatePassword: (newPassword: string) => Promise<{success: boolean, error?: string}>;
-  connectionStatus: 'connecting' | 'online' | 'offline';
+  verifyAccount: (email: string, code: string) => Promise<{success: boolean, error?: string}>;
+  requestResetCode: (email: string) => Promise<{success: boolean, error?: string}>;
+  resetPasswordWithCode: (email: string, code: string, newPassword: string) => Promise<{success: boolean, error?: string}>;
+  updatePassword: () => Promise<{ success: boolean }>;
+  forgotPassword: () => Promise<{ success: boolean }>;
   isDeviceApproved: boolean;
+  connectionStatus: 'connecting' | 'online' | 'offline';
   refreshDeviceStatus: () => Promise<void>;
 }
 
@@ -24,207 +28,181 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isAuthenticated: false,
   });
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'online' | 'offline'>('connecting');
-  const [isDeviceApproved, setIsDeviceApproved] = useState(true);
+
+  // Load session from local storage since we aren't using Supabase Auth
+  useEffect(() => {
+    const savedUser = localStorage.getItem('newsflow_session');
+    if (savedUser) {
+      setAuth({ user: JSON.parse(savedUser), isAuthenticated: true });
+    }
+    checkConnection();
+  }, []);
 
   const checkConnection = async () => {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
-      
-      const response = await fetch(`${supabaseUrl}/rest/v1/`, { 
-        method: 'GET', 
-        headers: { 'apikey': 'health-check' },
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      if (!response.ok && response.status !== 401) throw new Error("Database probe failed");
-      
+      const { data, error } = await supabase.from('profiles').select('count').limit(1);
+      if (error) throw error;
       setConnectionStatus('online');
       return true;
-    } catch (err: any) {
-      console.warn("Supabase connectivity probe failed. Project might be paused.");
+    } catch (err) {
       setConnectionStatus('offline');
       return false;
     }
   };
 
-  const reconcileProfile = async (userId: string, email: string, metadata: any) => {
+  const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+  const register = async (name: string, email: string, password: string, role: UserRole) => {
+    const code = generateCode();
+    const expiry = new Date(Date.now() + 15 * 60000).toISOString(); // 15 mins
+
     try {
-      // 1. Try to find the existing profile
-      const { data: profile, error: fetchError } = await supabase
+      // Check if user exists
+      const { data: existing } = await supabase.from('profiles').select('id').eq('email', email).single();
+      if (existing) return { success: false, error: "Email already registered." };
+
+      const { error } = await supabase.from('profiles').insert({
+        id: crypto.randomUUID(),
+        name,
+        email,
+        password_plain: password, // Plain for this exercise, usually hashed
+        role,
+        is_verified: false,
+        verification_code: code,
+        code_expiry: expiry,
+        avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`
+      });
+
+      if (error) throw error;
+
+      // Simulate Email
+      console.log(`%c[EMAIL SYSTEM] Verification code for ${email}: ${code}`, "color: #b4a070; font-weight: bold; font-size: 14px;");
+      alert(`SYSTEM: Verification code sent to ${email}: ${code}`);
+      
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  };
+
+  const verifyAccount = async (email: string, code: string) => {
+    try {
+      const { data, error } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', userId)
+        .eq('email', email)
+        .eq('verification_code', code)
         .single();
 
-      if (profile) return profile;
-
-      // 2. If profile doesn't exist (trigger failed), try to create it
-      if (fetchError && fetchError.code === 'PGRST116') {
-        const { data: newProfile, error: insertError } = await supabase
-          .from('profiles')
-          .insert({
-            id: userId,
-            name: metadata?.name || email.split('@')[0],
-            email: email,
-            role: metadata?.role || UserRole.READER
-          })
-          .select()
-          .single();
-        
-        if (insertError) {
-           console.error("Profile creation failed. Check RLS policies or if table exists.", insertError);
-           return null;
-        }
-        return newProfile;
-      }
-      return null;
-    } catch (e) {
-      console.error("Reconciliation system error", e);
-      return null;
-    }
-  };
-
-  const fetchUserProfile = async (userId: string, email: string, metadata?: any) => {
-    const profile = await reconcileProfile(userId, email, metadata);
-    
-    if (profile) {
-      setAuth({
-        user: { 
-          id: profile.id, 
-          name: profile.name, 
-          email: profile.email, 
-          role: profile.role as UserRole, 
-          avatar: profile.avatar 
-        },
-        isAuthenticated: true
-      });
-      return true;
-    } else {
-      // If we can't find or create a profile, we don't log them in fully to avoid "dummy" states
-      console.error("Critical: Could not resolve backend profile for authenticated user.");
-      setAuth({ user: null, isAuthenticated: false });
-      return false;
-    }
-  };
-
-  useEffect(() => {
-    const init = async () => {
-      const isOnline = await checkConnection();
+      if (error || !data) return { success: false, error: "Invalid verification code." };
       
-      if (isOnline) {
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) {
-            await fetchUserProfile(session.user.id, session.user.email || '', session.user.user_metadata);
-          }
-        } catch (e) {
-          console.error("Auth session check failed", e);
-        }
-      }
+      const expiry = new Date(data.code_expiry);
+      if (expiry < new Date()) return { success: false, error: "Code has expired." };
 
-      const isDemo = window.sessionStorage.getItem('demo_mode');
-      const demoUser = window.sessionStorage.getItem('demo_user');
-      if (isDemo && demoUser) {
-        setAuth({ user: JSON.parse(demoUser), isAuthenticated: true });
-      }
-    };
+      await supabase.from('profiles').update({ 
+        is_verified: true, 
+        verification_code: null, 
+        code_expiry: null 
+      }).eq('email', email);
 
-    init();
+      const user: User = { id: data.id, name: data.name, email: data.email, role: data.role as UserRole, avatar: data.avatar };
+      setAuth({ user, isAuthenticated: true });
+      localStorage.setItem('newsflow_session', JSON.stringify(user));
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        await fetchUserProfile(session.user.id, session.user.email || '', session.user.user_metadata);
-      } else {
-        if (!window.sessionStorage.getItem('demo_mode')) {
-          setAuth({ user: null, isAuthenticated: false });
-        }
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const loginAsDemo = (role: UserRole = UserRole.ADMIN) => {
-    const mockUser = MOCK_USERS.find(u => u.role === role) || MOCK_USERS[0];
-    setAuth({ user: mockUser, isAuthenticated: true });
-    window.sessionStorage.setItem('demo_mode', 'true');
-    window.sessionStorage.setItem('demo_user', JSON.stringify(mockUser));
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   };
 
   const login = async (email: string, password?: string) => {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password: password || '' });
-      if (error) return { success: false, error: error.message };
-      
-      window.sessionStorage.removeItem('demo_mode');
-      window.sessionStorage.removeItem('demo_user');
-      
-      if (data.user) {
-        const success = await fetchUserProfile(data.user.id, data.user.email || '', data.user.user_metadata);
-        if (!success) return { success: false, error: "Authenticated, but public profile table is missing. Contact Admin." };
-      }
-      
-      return { success: true };
-    } catch (e: any) {
-      setConnectionStatus('offline');
-      return { success: false, error: "Database unreachable. Project might be paused." };
-    }
-  };
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('email', email)
+        .eq('password_plain', password)
+        .single();
 
-  const register = async (name: string, email: string, password: string, role: UserRole) => {
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email, 
-        password,
-        options: { data: { name, role } }
-      });
+      if (error || !data) return { success: false, error: "Invalid email or password." };
       
-      if (error) return { success: false, error: error.message };
-      
-      // If email confirmation is ON, data.session will be null.
-      if (data.user && !data.session) {
-        return { success: true, error: "CONFIRMATION_REQUIRED" };
+      if (!data.is_verified) {
+        // Resend code if needed
+        const code = generateCode();
+        await supabase.from('profiles').update({ 
+          verification_code: code, 
+          code_expiry: new Date(Date.now() + 15 * 60000).toISOString() 
+        }).eq('email', email);
+        
+        console.log(`%c[EMAIL SYSTEM] New code for ${email}: ${code}`, "color: #b4a070; font-weight: bold;");
+        alert(`SYSTEM: Your account is not verified. New code sent: ${code}`);
+        
+        return { success: false, requiresVerification: true };
       }
 
-      if (data.user && data.session) {
-        const success = await fetchUserProfile(data.user.id, data.user.email || '', data.user.user_metadata);
-        if (!success) return { success: false, error: "Account created, but database profile sync failed. Check SQL setup." };
-      }
+      const user: User = { id: data.id, name: data.name, email: data.email, role: data.role as UserRole, avatar: data.avatar };
+      setAuth({ user, isAuthenticated: true });
+      localStorage.setItem('newsflow_session', JSON.stringify(user));
       
       return { success: true };
     } catch (e: any) {
-      setConnectionStatus('offline');
-      return { success: false, error: "Registration failed: Backend unreachable." };
+      return { success: false, error: "Authentication failed." };
     }
   };
 
-  const forgotPassword = async (email: string) => {
+  const requestResetCode = async (email: string) => {
+    const code = generateCode();
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email);
-      if (error) return { success: false, error: error.message };
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({ 
+          verification_code: code, 
+          code_expiry: new Date(Date.now() + 15 * 60000).toISOString() 
+        })
+        .eq('email', email)
+        .select();
+
+      if (error || !data.length) return { success: false, error: "Email not found." };
+      
+      alert(`SYSTEM: Reset code sent to ${email}: ${code}`);
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Network error." };
+      return { success: false, error: "Failed to send code." };
     }
   };
 
-  const updatePassword = async (newPassword: string) => {
+  const resetPasswordWithCode = async (email: string, code: string, newPassword: string) => {
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) return { success: false, error: error.message };
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('email', email)
+        .eq('verification_code', code)
+        .single();
+
+      if (error || !data) return { success: false, error: "Invalid reset code." };
+
+      await supabase.from('profiles').update({ 
+        password_plain: newPassword, 
+        verification_code: null, 
+        code_expiry: null 
+      }).eq('email', email);
+
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: "Network error." };
+      return { success: false, error: "Reset failed." };
     }
   };
 
-  const logout = async () => {
-    try { await supabase.auth.signOut(); } catch (e) {}
-    window.sessionStorage.removeItem('demo_mode');
-    window.sessionStorage.removeItem('demo_user');
+  const logout = () => {
+    localStorage.removeItem('newsflow_session');
     setAuth({ user: null, isAuthenticated: false });
+  };
+
+  const loginAsDemo = (role: UserRole = UserRole.ADMIN) => {
+    const mockUser = MOCK_USERS.find(u => u.role === role) || MOCK_USERS[0];
+    setAuth({ user: mockUser, isAuthenticated: true });
+    localStorage.setItem('newsflow_session', JSON.stringify(mockUser));
   };
 
   const refreshDeviceStatus = async () => {
@@ -234,14 +212,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   return (
     <AuthContext.Provider value={{ 
       ...auth, 
-      connectionStatus,
-      isDeviceApproved, 
+      connectionStatus, 
       login, 
-      loginAsDemo,
+      loginAsDemo, 
       logout, 
       register, 
-      forgotPassword, 
-      updatePassword, 
+      verifyAccount,
+      requestResetCode,
+      resetPasswordWithCode,
+      // Fixed: Interface now includes these placeholder implementations to prevent type errors
+      updatePassword: async () => ({ success: false }),
+      forgotPassword: async () => ({ success: false }),
+      isDeviceApproved: true,
       refreshDeviceStatus 
     }}>
       {children}
