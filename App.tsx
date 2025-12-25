@@ -25,33 +25,40 @@ const AuthListener = () => {
   const location = useLocation();
   
   useEffect(() => {
-    // 1. Immediate URL Check (Critical for redirection)
-    // If the user clicks a link with #type=recovery, we must show the ResetPassword page
-    // regardless of whether the Supabase event has fired yet.
-    const hash = window.location.hash;
-    if (hash && hash.includes('type=recovery')) {
-       if (!location.pathname.includes('reset-password')) {
-           // We explicitly keep the hash so Supabase can parse it on the destination page
-           // We strip the leading # because navigate adds it back if we use a relative path, 
-           // but with HashRouter we need to be careful.
-           // Since we are using HashRouter, window.location.hash might trigger weirdness.
-           // We simply navigate to the path. Supabase reads window.location.
-           navigate('/reset-password', { replace: true });
-       }
-    }
-
-    // 2. Supabase Event Listener
+    // Supabase Event Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
-        if (!location.pathname.includes('reset-password')) {
-           navigate('/reset-password', { replace: true });
-        }
+        // When recovery event fires, explicitly move to the clean route
+        // This prevents the router from snapping back to home if the hash is cleared
+        navigate('/reset-password', { replace: true });
       }
     });
     return () => subscription.unsubscribe();
   }, [navigate, location]);
 
   return null;
+};
+
+// Smart Catch-All Route to handle Supabase magic link hashes
+const CatchAllRoute = () => {
+  const [isRecovery, setIsRecovery] = useState(false);
+
+  useEffect(() => {
+    // Check raw window hash because Router might parse it as a path
+    const hash = window.location.hash;
+    // If we see access_token and type=recovery, it's a magic link
+    if (hash && (hash.includes('type=recovery') || hash.includes('access_token'))) {
+      setIsRecovery(true);
+    }
+  }, []);
+
+  if (isRecovery) {
+    // Render ResetPassword directly to keep the hash intact for Supabase to parse
+    return <ResetPassword />;
+  }
+  
+  // Default to Home if not a recovery link
+  return <Navigate to="/" replace />;
 };
 
 const ProtectedRoute = ({ children, roles }: { children?: React.ReactNode, roles?: UserRole[] }) => {
@@ -265,7 +272,9 @@ const App: React.FC = () => {
           <Route path="/articles/:id" element={<Layout><ArticleDetail /></Layout>} />
           <Route path="/epaper" element={<Layout><EPaperViewer pages={epaperPages} /></Layout>} />
           <Route path="/dashboard" element={<ProtectedRoute roles={[UserRole.ADMIN, UserRole.PUBLISHER, UserRole.EDITOR]}><Layout><Dashboard /></Layout></ProtectedRoute>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          
+          {/* Replace default catch-all with smart route */}
+          <Route path="*" element={<CatchAllRoute />} />
         </Routes>
       </HashRouter>
     </AuthProvider>

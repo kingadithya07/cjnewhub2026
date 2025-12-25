@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
@@ -20,7 +19,7 @@ export const ResetPassword: React.FC = () => {
 
   useEffect(() => {
     let mounted = true;
-    let pollInterval: NodeJS.Timeout;
+    let pollInterval: ReturnType<typeof setInterval>;
 
     const checkHashPresence = () => {
        const hash = window.location.hash;
