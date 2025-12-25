@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { UserRole } from '../types';
-import { Newspaper, User, Mail, ArrowRight, Lock, Shield, AlertCircle, ArrowLeft, Loader2, Wifi, WifiOff } from 'lucide-react';
+import { Newspaper, User, Mail, ArrowRight, Lock, Shield, AlertCircle, ArrowLeft, Loader2, Wifi, WifiOff, CheckCircle2 } from 'lucide-react';
 
 export const Register: React.FC = () => {
   const [name, setName] = useState('');
@@ -12,7 +12,7 @@ export const Register: React.FC = () => {
   const [role, setRole] = useState<UserRole>(UserRole.READER);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
+  const [successMode, setSuccessMode] = useState<'NONE' | 'CONFIRM' | 'DIRECT'>('NONE');
   
   const { register, connectionStatus } = useAuth();
   const navigate = useNavigate();
@@ -25,38 +25,40 @@ export const Register: React.FC = () => {
     try {
       const result = await register(name, email, password, role);
       if (result.success) {
-        setSuccess(true);
-        setTimeout(() => navigate('/login'), 3000);
+        if (result.error === 'CONFIRMATION_REQUIRED') {
+          setSuccessMode('CONFIRM');
+        } else {
+          setSuccessMode('DIRECT');
+          setTimeout(() => navigate('/'), 2000);
+        }
       } else {
-        setError(result.error || 'Registration failed. Please check your credentials.');
+        setError(result.error || 'Registration failed.');
       }
     } catch (err: any) {
-      setError(err.message || 'Network error. Please try again.');
+      setError(err.message || 'Network error.');
     } finally {
       setLoading(false);
     }
   };
 
-  const ConnectionBadge = () => (
-    <div className={`fixed bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-lg z-50 transition-all ${connectionStatus === 'online' ? 'bg-green-100 text-green-700' : connectionStatus === 'offline' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-400'}`}>
-      {connectionStatus === 'online' ? <Wifi size={12} /> : <WifiOff size={12} />}
-      {connectionStatus === 'online' ? 'System Online' : connectionStatus === 'offline' ? 'System Offline' : 'Connecting...'}
-    </div>
-  );
-
-  if (success) {
+  if (successMode !== 'NONE') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <ConnectionBadge />
         <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-8 text-center animate-in fade-in zoom-in duration-300">
           <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 text-green-600">
-             <Shield className="animate-bounce" size={32} />
+             <CheckCircle2 size={32} />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Registration Started!</h2>
-          <p className="text-gray-500 mb-6">Your account is being created. <strong>IMPORTANT:</strong> You must click the confirmation link in your email to enable your account.</p>
-          <div className="flex items-center justify-center gap-2 text-indigo-600 font-bold">
-             <Loader2 size={20} className="animate-spin" /> Redirecting to Login...
-          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            {successMode === 'CONFIRM' ? 'Check Your Email' : 'Account Created!'}
+          </h2>
+          <p className="text-gray-500 mb-6">
+            {successMode === 'CONFIRM' 
+              ? `We've sent a verification link to ${email}. You must click it to activate your account.` 
+              : 'Your account has been successfully created. Redirecting...'}
+          </p>
+          <button onClick={() => navigate('/login')} className="w-full bg-[#111827] text-white py-3 rounded-xl font-bold">
+             Back to Login
+          </button>
         </div>
       </div>
     );
@@ -64,7 +66,6 @@ export const Register: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <ConnectionBadge />
       <Link to="/" className="absolute top-6 left-6 flex items-center text-gray-500 hover:text-indigo-900 transition-colors gap-2 font-medium z-10">
         <ArrowLeft size={20} />
         <span className="hidden sm:inline">Home</span>
@@ -84,16 +85,9 @@ export const Register: React.FC = () => {
         <div className="p-8">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-xl text-sm flex items-start gap-3 animate-in fade-in duration-200">
+              <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-xl text-sm flex items-start gap-3">
                 <AlertCircle className="shrink-0 mt-0.5" size={18} /> 
                 <p className="font-medium">{error}</p>
-              </div>
-            )}
-
-            {connectionStatus === 'offline' && (
-              <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl text-xs text-orange-800 flex items-start gap-3">
-                <AlertCircle size={16} className="shrink-0" />
-                <p><strong>Warning:</strong> The system is currently unable to reach Supabase. If you are seeing "Failed to fetch", please check if your Supabase project is <strong>paused</strong>.</p>
               </div>
             )}
 
@@ -161,7 +155,7 @@ export const Register: React.FC = () => {
             <div className="pt-2">
               <button
                 type="submit"
-                disabled={loading || connectionStatus === 'offline'}
+                disabled={loading}
                 className="w-full bg-[#111827] hover:bg-black text-white font-bold py-4 rounded-xl flex items-center justify-center space-x-2 transition-all shadow-xl active:scale-95 disabled:opacity-50"
               >
                 <span>{loading ? 'Creating Account...' : 'Join Hub'}</span>

@@ -38,29 +38,30 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       
       clearTimeout(timeoutId);
+      if (!response.ok && response.status !== 401) throw new Error("Database probe failed");
+      
       setConnectionStatus('online');
       return true;
     } catch (err: any) {
-      console.warn("Supabase connectivity probe failed.");
+      console.warn("Supabase connectivity probe failed. Project might be paused.");
       setConnectionStatus('offline');
       return false;
     }
   };
 
-  /**
-   * Reconcile Profile: Ensures a row exists in the public.profiles table.
-   * This handles cases where the Supabase trigger might have failed.
-   */
   const reconcileProfile = async (userId: string, email: string, metadata: any) => {
     try {
+      // 1. Try to find the existing profile
       const { data: profile, error: fetchError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
 
+      if (profile) return profile;
+
+      // 2. If profile doesn't exist (trigger failed), try to create it
       if (fetchError && fetchError.code === 'PGRST116') {
-        // Profile doesn't exist, create it manually
         const { data: newProfile, error: insertError } = await supabase
           .from('profiles')
           .insert({
@@ -72,47 +73,39 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           .select()
           .single();
         
-        if (newProfile) return newProfile;
+        if (insertError) {
+           console.error("Profile creation failed. Check RLS policies or if table exists.", insertError);
+           return null;
+        }
+        return newProfile;
       }
-      return profile;
+      return null;
     } catch (e) {
-      console.error("Reconciliation error", e);
+      console.error("Reconciliation system error", e);
       return null;
     }
   };
 
   const fetchUserProfile = async (userId: string, email: string, metadata?: any) => {
-    try {
-      const profile = await reconcileProfile(userId, email, metadata);
-      
-      if (profile) {
-        setAuth({
-          user: { 
-            id: profile.id, 
-            name: profile.name, 
-            email: profile.email, 
-            role: profile.role as UserRole, 
-            avatar: profile.avatar 
-          },
-          isAuthenticated: true
-        });
-      } else {
-        // Fallback to metadata if table is unreachable
-        setAuth({
-          user: { 
-            id: userId, 
-            name: metadata?.name || email.split('@')[0], 
-            email: email, 
-            role: metadata?.role || UserRole.READER 
-          },
-          isAuthenticated: true
-        });
-      }
-    } catch (err) {
+    const profile = await reconcileProfile(userId, email, metadata);
+    
+    if (profile) {
       setAuth({
-        user: { id: userId, name: email.split('@')[0], email: email, role: UserRole.READER },
+        user: { 
+          id: profile.id, 
+          name: profile.name, 
+          email: profile.email, 
+          role: profile.role as UserRole, 
+          avatar: profile.avatar 
+        },
         isAuthenticated: true
       });
+      return true;
+    } else {
+      // If we can't find or create a profile, we don't log them in fully to avoid "dummy" states
+      console.error("Critical: Could not resolve backend profile for authenticated user.");
+      setAuth({ user: null, isAuthenticated: false });
+      return false;
     }
   };
 
@@ -124,7 +117,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user) {
-            fetchUserProfile(session.user.id, session.user.email || '', session.user.user_metadata);
+            await fetchUserProfile(session.user.id, session.user.email || '', session.user.user_metadata);
           }
         } catch (e) {
           console.error("Auth session check failed", e);
@@ -140,9 +133,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     init();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
-        fetchUserProfile(session.user.id, session.user.email || '', session.user.user_metadata);
+        await fetchUserProfile(session.user.id, session.user.email || '', session.user.user_metadata);
       } else {
         if (!window.sessionStorage.getItem('demo_mode')) {
           setAuth({ user: null, isAuthenticated: false });
@@ -169,16 +162,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       window.sessionStorage.removeItem('demo_user');
       
       if (data.user) {
-        await fetchUserProfile(data.user.id, data.user.email || '', data.user.user_metadata);
+        const success = await fetchUserProfile(data.user.id, data.user.email || '', data.user.user_metadata);
+        if (!success) return { success: false, error: "Authenticated, but public profile table is missing. Contact Admin." };
       }
       
       return { success: true };
     } catch (e: any) {
       setConnectionStatus('offline');
-      return { 
-        success: false, 
-        error: "Connection failure: Could not reach Supabase." 
-      };
+      return { success: false, error: "Database unreachable. Project might be paused." };
     }
   };
 
@@ -192,18 +183,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       if (error) return { success: false, error: error.message };
       
-      // If user is immediately logged in (email confirmation off)
+      // If email confirmation is ON, data.session will be null.
+      if (data.user && !data.session) {
+        return { success: true, error: "CONFIRMATION_REQUIRED" };
+      }
+
       if (data.user && data.session) {
-        await fetchUserProfile(data.user.id, data.user.email || '', data.user.user_metadata);
+        const success = await fetchUserProfile(data.user.id, data.user.email || '', data.user.user_metadata);
+        if (!success) return { success: false, error: "Account created, but database profile sync failed. Check SQL setup." };
       }
       
       return { success: true };
     } catch (e: any) {
       setConnectionStatus('offline');
-      return { 
-        success: false, 
-        error: "Registration failed: Backend unreachable." 
-      };
+      return { success: false, error: "Registration failed: Backend unreachable." };
     }
   };
 
