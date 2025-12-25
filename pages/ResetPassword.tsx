@@ -3,64 +3,88 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { supabase } from '../services/supabaseClient';
-import { Mail, Lock, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck, KeyRound, Newspaper, Loader2, RefreshCw } from 'lucide-react';
+import { Lock, CheckCircle2, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck, KeyRound, Loader2 } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { verifyOTP, updatePassword, isAuthenticated, user } = useAuth();
 
-  // Extract email/code from URL
+  // Extract email/code from URL parameters
   const emailParam = searchParams.get('email') || '';
   const codeParam = searchParams.get('code') || searchParams.get('token');
   
+  // Check for hash parameters (Supabase Implicit Flow often puts tokens in hash)
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#\/?/, '').split('?')[1] || window.location.hash.slice(1));
+  const typeParam = searchParams.get('type') || hashParams.get('type');
+  const accessTokenParam = hashParams.get('access_token');
+
   const [step, setStep] = useState<1 | 2>(1);
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [initialCheckDone, setInitialCheckDone] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true); // New loading state for initial check
   const [error, setError] = useState('');
 
-  // 1. Check for existing session or Magic Link recovery
+  // 1. CRITICAL: Watch for Authentication State
+  // If the user is authenticated (via Magic Link or Session Recovery), IMMEDIATELY go to Step 2.
   useEffect(() => {
-    const checkSession = async () => {
-      // If we are already authenticated (e.g. Magic Link clicked and processed), 
-      // we can theoretically move to step 2.
-      // However, to satisfy the UX requirement "enter code", we pre-fill if authenticated.
-      if (isAuthenticated) {
-        // If authenticated via link, we might not have the OTP code in params if hash clobbered it.
-        // We set a placeholder to allow the UI to function.
-        setOtp(['*', '*', '*', '*', '*', '*']); 
-      }
-      
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-        if (event === 'PASSWORD_RECOVERY' || (session && event === 'SIGNED_IN')) {
-           // We do not force step 2 here immediately to allow the user to see Step 1 and click "Verify" 
-           // if they wish, but we ensure the OTP boxes are filled visually.
-           setOtp(['*', '*', '*', '*', '*', '*']);
-        }
-      });
-      
-      setInitialCheckDone(true);
-      return () => subscription.unsubscribe();
-    };
-
-    checkSession();
+    if (isAuthenticated) {
+      setStep(2);
+      setCheckingSession(false);
+    }
   }, [isAuthenticated]);
 
-  // 2. Pre-fill OTP if present in URL (The "Internal" Generation)
+  // 2. Check for Recovery Event or Hash Token
   useEffect(() => {
-    if (codeParam) {
-      // If code is provided in link, auto-fill the boxes
+    let mounted = true;
+
+    const checkRecovery = async () => {
+      // If we have an access token in the hash but aren't authenticated yet, Supabase is likely processing it.
+      // We keep 'checkingSession' true to show a spinner.
+      if (accessTokenParam && typeParam === 'recovery') {
+         // Allow some time for Supabase onAuthStateChange to fire in AuthContext
+         // If it takes too long, we might need to notify user, but usually it's fast.
+         return;
+      }
+      
+      // If no token and not authenticated, we stop checking and show Step 1 (Manual Code Entry)
+      if (!isAuthenticated) {
+          if (mounted) setCheckingSession(false);
+      }
+    };
+
+    checkRecovery();
+    
+    // Listen specifically for the PASSWORD_RECOVERY event which signifies a successful link click
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
+        if (mounted) {
+            setStep(2);
+            setCheckingSession(false);
+        }
+      }
+    });
+
+    return () => {
+        mounted = false;
+        subscription.unsubscribe();
+    };
+  }, [accessTokenParam, typeParam, isAuthenticated]);
+
+  // 3. Pre-fill OTP if 'code' param exists (PKCE Flow or Manual Link)
+  useEffect(() => {
+    if (codeParam && step === 1) {
       const codeChars = codeParam.slice(0, 6).split('');
       const newOtp = [...otp];
-      codeChars.forEach((char, i) => {
-        if (i < 6) newOtp[i] = char;
-      });
+      codeChars.forEach((char, i) => { if (i < 6) newOtp[i] = char; });
       setOtp(newOtp);
+      
+      // Optional: Auto-submit if we have a full code? 
+      // User might prefer to click verify to be sure.
     }
-  }, [codeParam]);
+  }, [codeParam, step]);
 
   const handleOtpChange = (index: number, value: string) => {
     if (!/^\d*$/.test(value)) return;
@@ -68,7 +92,6 @@ export const ResetPassword: React.FC = () => {
     newOtp[index] = value.slice(-1);
     setOtp(newOtp);
 
-    // Auto-focus next input
     if (value && index < 5) {
       const nextInput = document.getElementById(`reset-otp-${index + 1}`);
       nextInput?.focus();
@@ -85,14 +108,12 @@ export const ResetPassword: React.FC = () => {
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // 1. If we are ALREADY authenticated (Magic Link), we bypass the code check
-    // because the link itself was the verification.
+    // If authenticated, we just move to step 2 (Verification is implicit)
     if (isAuthenticated) {
         setStep(2);
         return;
     }
 
-    // 2. Otherwise, we try to verify manually using the code
     const token = otp.join('');
     if (token.length < 6) return setError('Please enter the full 6-digit code.');
     if (!emailParam) return setError('Email context missing. Please request a new code.');
@@ -108,7 +129,7 @@ export const ResetPassword: React.FC = () => {
         setError(result.error || 'The code entered is invalid or has expired.');
       }
     } catch (err) {
-      setError('Verification failed. Please check your connection and try again.');
+      setError('Verification failed. Please check your connection.');
     } finally {
       setLoading(false);
     }
@@ -123,33 +144,27 @@ export const ResetPassword: React.FC = () => {
     setError('');
 
     try {
-      // --- PASSWORD HISTORY CHECK ---
-      // Use the email from params OR the authenticated user's email
+      // Use email from params OR authenticated user
       const effectiveEmail = emailParam || user?.email;
 
+      // Prevent password reuse
       if (effectiveEmail) {
         const { data: reuseCheckData } = await supabase.auth.signInWithPassword({
             email: effectiveEmail,
             password: password
         });
-
-        // If we successfully signed in, it means the NEW password matches the OLD one.
         if (reuseCheckData.user) {
             setLoading(false);
             setError("You cannot use your previous password. Please choose a different one.");
-            // We should sign out immediately because we just signed in with the old password to check it
-            // but we want to stay in the recovery session if possible. 
-            // However, Supabase session handling might require us to rely on the update call now.
             return;
         }
       }
 
-      // If sign-in failed (good thing), we proceed to update.
       const result = await updatePassword(password);
       if (result.success) {
         navigate('/auth-success?type=password-reset-success');
       } else {
-        setError(result.error || 'Failed to update password. Your session may have timed out.');
+        setError(result.error || 'Failed to update password. Session may have expired.');
       }
     } catch (err) {
       setError('An unexpected error occurred during password update.');
@@ -158,11 +173,14 @@ export const ResetPassword: React.FC = () => {
     }
   };
 
-  // If processing magic link hash, show loader briefly
-  if (!initialCheckDone && window.location.hash.includes('access_token')) {
+  // --- RENDER LOADING STATE ---
+  // If we suspect a recovery token is being processed, show spinner instead of Step 1 form
+  if (checkingSession && (accessTokenParam || typeParam === 'recovery')) {
      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-            <Loader2 className="animate-spin text-[#b4a070]" size={48} />
+        <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+            <Loader2 className="animate-spin text-[#b4a070] mb-4" size={48} />
+            <h2 className="text-xl font-bold text-gray-800">Verifying Link...</h2>
+            <p className="text-gray-500 text-sm mt-2">Please wait while we secure your session.</p>
         </div>
      );
   }
@@ -171,7 +189,7 @@ export const ResetPassword: React.FC = () => {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
         
-        {/* Newspaper Header Styling */}
+        {/* Header */}
         <div className="bg-[#111827] p-8 text-center border-b-4 border-[#b4a070]">
            <div className="flex justify-center mb-6">
               <div className="bg-[#b4a070] text-black p-3 rounded-full shadow-lg">
@@ -197,9 +215,9 @@ export const ResetPassword: React.FC = () => {
           {step === 1 ? (
             <div className="animate-in fade-in slide-in-from-left duration-300">
               <p className="text-gray-600 text-center mb-8 text-sm leading-relaxed">
-                Verification code generated from secure link for <br/>
-                <span className="font-bold text-gray-900">{emailParam || user?.email || 'your account'}</span>.
-                <br/><span className="text-xs text-indigo-600 font-bold mt-1 block">Code auto-filled from link.</span>
+                Enter the 6-digit code sent to <br/>
+                <span className="font-bold text-gray-900">{emailParam || user?.email || 'your email'}</span>.
+                {!codeParam && <br/><span className="text-xs text-gray-400 mt-1 block">(If you clicked a link, the code should auto-fill)</span>}
               </p>
 
               <form onSubmit={handleVerifyOtp} className="space-y-8">
@@ -211,11 +229,11 @@ export const ResetPassword: React.FC = () => {
                       type="text"
                       maxLength={1}
                       value={digit}
-                      // Make it readOnly if auto-filled (authenticated or param)
-                      readOnly={isAuthenticated || !!codeParam} 
+                      // Only make readonly if we are effectively authenticated or loading
+                      readOnly={isAuthenticated} 
                       onChange={(e) => handleOtpChange(index, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                      className={`w-11 h-14 md:w-12 md:h-16 text-center text-2xl font-black border-2 rounded-xl outline-none transition-all shadow-sm ${isAuthenticated || codeParam ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed' : 'bg-white text-black border-gray-100 focus:border-[#b4a070] focus:ring-4 focus:ring-[#b4a070]/10'}`}
+                      className={`w-11 h-14 md:w-12 md:h-16 text-center text-2xl font-black border-2 rounded-xl outline-none transition-all shadow-sm ${isAuthenticated ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-not-allowed' : 'bg-white text-black border-gray-100 focus:border-[#b4a070] focus:ring-4 focus:ring-[#b4a070]/10'}`}
                     />
                   ))}
                 </div>
@@ -223,7 +241,6 @@ export const ResetPassword: React.FC = () => {
                 <div className="pt-2">
                   <button
                     type="submit"
-                    // Enable button if OTP is filled OR if we are authenticated (phantom code)
                     disabled={loading || (!isAuthenticated && otp.some(d => !d))}
                     className="w-full bg-[#111827] hover:bg-black text-white font-bold py-5 rounded-2xl flex items-center justify-center space-x-3 transition-all shadow-xl active:scale-95 disabled:opacity-50 disabled:grayscale"
                   >
@@ -232,19 +249,20 @@ export const ResetPassword: React.FC = () => {
                   </button>
                 </div>
                 
-                {!codeParam && !isAuthenticated && (
-                    <div className="text-center pt-2">
+                <div className="text-center pt-2">
                     <Link to="/login" className="inline-flex items-center gap-2 text-xs font-black text-gray-400 hover:text-indigo-600 uppercase tracking-widest transition-colors">
                         <ArrowLeft size={14} /> Back to Sign In
                     </Link>
-                    </div>
-                )}
+                </div>
               </form>
             </div>
           ) : (
             <div className="animate-in fade-in slide-in-from-right duration-500">
                <div className="mb-8 text-center">
-                  <p className="text-gray-600 text-sm">Identity verified. Please set your new password below.</p>
+                  <p className="text-green-600 bg-green-50 p-3 rounded-lg text-sm font-bold border border-green-100 inline-flex items-center gap-2">
+                     <CheckCircle2 size={16} /> Identity Verified
+                  </p>
+                  <p className="text-gray-500 text-xs mt-3">Please set your new password below.</p>
                </div>
 
                <form onSubmit={handleResetPassword} className="space-y-6">
