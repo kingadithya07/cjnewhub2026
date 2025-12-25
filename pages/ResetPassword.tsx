@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
 import { supabase } from '../services/supabaseClient';
-import { Lock, CheckCircle, AlertCircle, ShieldCheck, Loader2, ArrowLeft, RefreshCw, Smartphone } from 'lucide-react';
+import { Lock, CheckCircle, AlertCircle, ShieldCheck, Loader2, RefreshCw } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
   const navigate = useNavigate();
@@ -27,10 +28,8 @@ export const ResetPassword: React.FC = () => {
     };
 
     // This function runs an aggressive check to find the session "instantly"
-    // avoiding the wait for standard events if they are slow.
     const aggressiveVerify = () => {
       let attempts = 0;
-      // Check every 100ms (10 times per second) for a "no-wait" experience
       pollInterval = setInterval(async () => {
         if (!mounted) return;
         
@@ -42,15 +41,11 @@ export const ResetPassword: React.FC = () => {
           setVerifyingLink(false);
         } else {
           attempts++;
-          // Extended timeout: 
-          // If the URL has a hash token, we wait longer (10 seconds / 100 attempts)
-          // If no hash, we give up sooner (3 seconds / 30 attempts)
-          const maxAttempts = checkHashPresence() ? 100 : 30;
+          const maxAttempts = checkHashPresence() ? 100 : 30; // 10s vs 3s
           
           if (attempts > maxAttempts) {
             clearInterval(pollInterval);
             if (mounted) {
-               // Only fail if we haven't verified yet
                setVerifyingLink((current) => {
                  if (current) return false;
                  return current;
@@ -67,12 +62,11 @@ export const ResetPassword: React.FC = () => {
         setSessionVerified(true);
         setVerifyingLink(false);
       } else {
-        // Start polling immediately if not found
         aggressiveVerify();
       }
     });
 
-    // 2. Standard Event Listener (Backup)
+    // 2. Standard Event Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
         if (mounted) {
@@ -115,7 +109,6 @@ export const ResetPassword: React.FC = () => {
   const handleManualRetry = () => {
     setVerifyingLink(true);
     setSessionVerified(false);
-    // Reloading forces Supabase to re-parse the URL hash
     window.location.reload();
   };
 
@@ -124,14 +117,13 @@ export const ResetPassword: React.FC = () => {
         <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
             <div className="bg-white p-8 rounded-2xl shadow-xl flex flex-col items-center max-w-sm w-full text-center animate-in fade-in zoom-in duration-300">
                 <Loader2 className="animate-spin text-[#b4a070] mb-4" size={48} />
-                <h2 className="text-xl font-bold text-gray-800">Securing Connection...</h2>
-                <p className="text-gray-500 text-sm mt-2">Syncing authorities...</p>
+                <h2 className="text-xl font-bold text-gray-800">Verifying Link...</h2>
+                <p className="text-gray-500 text-sm mt-2">Please wait while we secure your connection.</p>
             </div>
         </div>
      );
   }
 
-  // If validation finished but we failed to get a session
   if (!sessionVerified) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -141,28 +133,28 @@ export const ResetPassword: React.FC = () => {
              </div>
              <h2 className="text-2xl font-bold text-gray-900 mb-2">Link Invalid or Expired</h2>
              <p className="text-gray-500 mb-6 text-sm leading-relaxed">
-                We couldn't verify the security token. This happens if the link was already used or opened in a different browser.
+                We couldn't verify the reset token. The link may have expired or was already used.
              </p>
              
              <button 
                 onClick={handleManualRetry}
                 className="w-full bg-white border-2 border-gray-200 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-colors mb-3 flex items-center justify-center gap-2"
              >
-                <RefreshCw size={16} /> Force Retry
+                <RefreshCw size={16} /> Try Again
              </button>
 
              <Link 
                 to="/login"
                 className="inline-flex items-center justify-center w-full bg-[#111827] text-white font-bold py-4 rounded-xl hover:bg-black transition-colors shadow-lg"
              >
-                Return to Login
+                Back to Login
              </Link>
           </div>
         </div>
       );
   }
 
-  // Authenticated & Session Verified: Show Reset Form
+  // Authenticated & Verified -> Show New Password Section
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
@@ -174,10 +166,10 @@ export const ResetPassword: React.FC = () => {
               </div>
            </div>
            <h2 className="text-3xl font-black text-white mb-2" style={{ fontFamily: '"Playfair Display", serif' }}>
-             Security Update
+             Reset Password
            </h2>
            <p className="text-gray-400 text-sm tracking-widest uppercase font-bold">
-             Create New Password
+             Create Your New Password
            </p>
         </div>
 
@@ -191,9 +183,8 @@ export const ResetPassword: React.FC = () => {
 
           <div className="mb-8 text-center">
              <p className="text-green-600 bg-green-50 p-3 rounded-lg text-sm font-bold border border-green-100 inline-flex items-center gap-2">
-                <CheckCircle size={16} /> Authorities Verified
+                <CheckCircle size={16} /> Identity Verified
              </p>
-             <p className="text-gray-500 text-xs mt-3">Please set your new password below.</p>
           </div>
 
           <form onSubmit={handleResetPassword} className="space-y-6">
@@ -231,7 +222,7 @@ export const ResetPassword: React.FC = () => {
                 disabled={loading || !password || password !== confirmPassword}
                 className="w-full bg-[#111827] hover:bg-black text-white font-bold py-5 rounded-2xl flex items-center justify-center space-x-3 transition-all shadow-xl active:scale-95 disabled:opacity-50"
               >
-                <span className="text-lg">{loading ? 'Updating...' : 'Set New Password'}</span>
+                <span className="text-lg">{loading ? 'Updating...' : 'Update Password'}</span>
                 {!loading && <CheckCircle size={22} className="text-[#b4a070]" />}
               </button>
             </div>

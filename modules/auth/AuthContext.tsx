@@ -8,8 +8,8 @@ interface AuthContextType extends AuthState {
   login: (email: string, password?: string) => Promise<{success: boolean, error?: string, isPendingDevice?: boolean}>;
   logout: () => void;
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
-  forgotPassword: (email: string) => Promise<boolean>;
   updatePassword: (newPassword: string) => Promise<{success: boolean, error?: string}>;
+  forgotPassword: (email: string) => Promise<{success: boolean, error?: string}>;
   verifyOTP: (email: string, token: string, type: 'signup' | 'recovery') => Promise<{success: boolean, error?: string}>;
   isDeviceApproved: boolean;
   refreshDeviceStatus: () => Promise<void>;
@@ -25,9 +25,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isDeviceApproved, setIsDeviceApproved] = useState(false);
 
   const getRedirectUrl = () => {
-    // When dealing with hash routers and Supabase magic links, simpler is often better.
-    // Redirecting to the origin ensures the hash is attached to the root, which the Supabase client can parse easily.
-    // The App's AuthListener will then handle the routing to /reset-password.
     return window.location.origin;
   };
 
@@ -151,6 +148,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: true };
   };
 
+  const forgotPassword = async (email: string) => {
+    // Redirect to root to allow CatchAllRoute to parse the hash token correctly
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  };
+
   const refreshDeviceStatus = async () => {
     if (auth.user) await checkDeviceTrust(auth.user.id);
   };
@@ -159,15 +165,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await supabase.auth.signOut();
     setAuth({ user: null, isAuthenticated: false });
     setIsDeviceApproved(false);
-  };
-
-  const forgotPassword = async (email: string) => {
-    // We send them to the root URL. Supabase will append #access_token=...
-    // The App.tsx AuthListener will detect the PASSWORD_RECOVERY event and redirect to /reset-password.
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: getRedirectUrl(),
-    });
-    return !error;
   };
 
   const updatePassword = async (newPassword: string) => {
@@ -179,7 +176,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <AuthContext.Provider value={{ ...auth, isDeviceApproved, login, logout, register, forgotPassword, updatePassword, refreshDeviceStatus, verifyOTP }}>
+    <AuthContext.Provider value={{ ...auth, isDeviceApproved, login, logout, register, updatePassword, forgotPassword, refreshDeviceStatus, verifyOTP }}>
       {children}
     </AuthContext.Provider>
   );

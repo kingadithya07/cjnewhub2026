@@ -273,8 +273,8 @@ const App: React.FC = () => {
           <Route path="/epaper" element={<Layout><EPaperViewer pages={epaperPages} /></Layout>} />
           <Route path="/dashboard" element={<ProtectedRoute roles={[UserRole.ADMIN, UserRole.PUBLISHER, UserRole.EDITOR]}><Layout><Dashboard /></Layout></ProtectedRoute>} />
           
-          {/* Replace default catch-all with smart route */}
-          <Route path="*" element={<CatchAllRoute />} />
+           {/* Smart route for redirect handling */}
+           <Route path="*" element={<CatchAllRoute />} />
         </Routes>
       </HashRouter>
     </AuthProvider>
