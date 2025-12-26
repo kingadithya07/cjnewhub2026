@@ -17,20 +17,6 @@ import { Article, UserRole, EPaperPage, Classified } from './types';
 import { Store, Newspaper, TrendingUp, MapPin, DollarSign, Loader2 } from 'lucide-react';
 import { MOCK_ARTICLES, MOCK_EPAPER } from './services/mockData';
 
-// Listener for Supabase Auth Events (like Password Reset links)
-const AuthListener = () => {
-  const navigate = useNavigate();
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        navigate('/reset-password');
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [navigate]);
-  return null;
-};
-
 const ProtectedRoute = ({ children, roles }: { children?: React.ReactNode, roles?: UserRole[] }) => {
   const { user, isAuthenticated } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
@@ -49,39 +35,14 @@ const Home: React.FC = () => {
     const loadHomeData = async () => {
       setLoading(true);
       try {
-        const { data: art } = await supabase
-          .from('articles')
-          .select('*')
-          .eq('status', 'PUBLISHED')
-          .order('created_at', { ascending: false });
-        
+        const { data: art } = await supabase.from('articles').select('*').eq('status', 'PUBLISHED');
         if (art && art.length > 0) {
-          setArticles(art.map(a => ({
-            id: a.id,
-            title: a.title,
-            summary: a.summary,
-            content: a.content,
-            authorId: a.author_id,
-            authorName: a.author_name,
-            authorAvatar: a.author_avatar,
-            status: a.status,
-            category: a.category,
-            thumbnailUrl: a.thumbnail_url,
-            isFeatured: a.is_featured,
-            isTrending: a.is_trending,
-            createdAt: a.created_at
-          })));
+          setArticles(art.map(a => ({...a, createdAt: a.created_at, authorName: a.author_name, authorAvatar: a.author_avatar, thumbnailUrl: a.thumbnail_url})));
         } else {
           setArticles(MOCK_ARTICLES.filter(a => a.status === 'PUBLISHED'));
         }
-
-        const { data: cls } = await supabase
-          .from('classifieds')
-          .select('*')
-          .eq('status', 'ACTIVE')
-          .order('created_at', { ascending: false });
-        
-        if (cls) setClassifieds(cls.map(c => ({ ...c, createdAt: c.created_at })));
+        const { data: cls } = await supabase.from('classifieds').select('*').eq('status', 'ACTIVE');
+        if (cls) setClassifieds(cls);
       } catch (err) {
         setArticles(MOCK_ARTICLES.filter(a => a.status === 'PUBLISHED'));
       } finally {
@@ -104,33 +65,29 @@ const Home: React.FC = () => {
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-col lg:flex-row gap-8">
         <div className="lg:w-2/3 w-full">
-            {featuredArticles.length > 0 ? (
-              <HeroSlider articles={featuredArticles} />
-            ) : (
-              <div className="bg-[#111827] text-white p-12 rounded-2xl shadow-xl flex flex-col items-start justify-center relative overflow-hidden h-[400px]">
-                  <div className="relative z-10">
-                    <span className="bg-[#b4a070] text-black text-[10px] font-bold px-3 py-1 rounded-full mb-4 inline-block tracking-widest uppercase">CJ NEWS HUB</span>
-                    <h1 className="text-4xl md:text-5xl font-bold mb-4 leading-tight font-serif">Welcome to the Global Edition</h1>
-                    <p className="text-gray-400 mb-6 text-lg">Your daily digital companion for world-class journalism.</p>
+            {featuredArticles.length > 0 ? <HeroSlider articles={featuredArticles} /> : (
+              <div className="bg-[#111827] text-white p-12 rounded-3xl shadow-xl h-[400px] flex items-center justify-center border-b-4 border-[#b4a070]">
+                  <div className="text-center">
+                    <span className="bg-[#b4a070] text-black text-[10px] font-black px-4 py-1.5 rounded-full mb-4 inline-block tracking-[0.2em] uppercase">CJ NEWS HUB</span>
+                    <h1 className="text-5xl font-black mb-4 leading-tight font-serif tracking-tight">Global Edition</h1>
+                    <p className="text-gray-400 uppercase text-[10px] tracking-[0.3em] font-bold">Archives & Digital Records</p>
                   </div>
               </div>
             )}
         </div>
         <div className="lg:w-1/3 w-full">
-           <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200 h-full">
-              <div className="flex items-center space-x-2 mb-4 border-b pb-2">
+           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 h-full">
+              <div className="flex items-center space-x-2 mb-6 border-b border-gray-50 pb-4">
                  <TrendingUp className="text-red-600" size={20} />
-                 <h3 className="font-bold text-gray-900">Trending Now</h3>
+                 <h3 className="font-black text-gray-900 uppercase text-xs tracking-widest">Trending Now</h3>
               </div>
-              <div className="space-y-4">
+              <div className="space-y-6">
                  {trendingArticles.map((article, idx) => (
-                    <div key={article.id} className="group cursor-pointer flex gap-3">
-                       <span className="text-2xl font-bold text-gray-200 group-hover:text-[#b4a070] transition-colors w-8 flex-shrink-0 text-center">{idx + 1}</span>
+                    <div key={article.id} className="group cursor-pointer flex gap-4">
+                       <span className="text-3xl font-black text-gray-100 group-hover:text-[#b4a070] transition-colors w-8 text-center">{idx + 1}</span>
                        <div>
-                          <h4 className="font-semibold text-sm text-gray-800 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-snug">
-                             {article.title}
-                          </h4>
-                          <span className="text-[10px] uppercase font-bold text-gray-400 mt-1 block">{article.category}</span>
+                          <h4 className="font-bold text-sm text-gray-800 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-snug">{article.title}</h4>
+                          <span className="text-[9px] uppercase font-black text-gray-400 mt-1 block tracking-widest">{article.category}</span>
                        </div>
                     </div>
                  ))}
@@ -141,37 +98,28 @@ const Home: React.FC = () => {
 
       <div className="flex flex-col lg:flex-row gap-8">
         <div className="flex-1">
-          <div className="flex items-center space-x-6 border-b mb-6">
-            <button onClick={() => setActiveTab('NEWS')} className={`pb-3 text-lg font-bold flex items-center space-x-2 transition-colors border-b-2 ${activeTab === 'NEWS' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
-              <Newspaper size={20} />
-              <span>Latest News</span>
+          <div className="flex items-center space-x-8 border-b mb-8">
+            <button onClick={() => setActiveTab('NEWS')} className={`pb-4 text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 transition-all border-b-2 ${activeTab === 'NEWS' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-800'}`}>
+              <Newspaper size={18} /> News Archives
             </button>
-            <button onClick={() => setActiveTab('CLASSIFIEDS')} className={`pb-3 text-lg font-bold flex items-center space-x-2 transition-colors border-b-2 ${activeTab === 'CLASSIFIEDS' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
-              <Store size={20} />
-              <span>Classifieds</span>
+            <button onClick={() => setActiveTab('CLASSIFIEDS')} className={`pb-4 text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 transition-all border-b-2 ${activeTab === 'CLASSIFIEDS' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-800'}`}>
+              <Store size={18} /> Classifieds
             </button>
           </div>
           {activeTab === 'NEWS' ? <ArticleList articles={articles} /> : (
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {classifieds.map(ad => (
-                  <div key={ad.id} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow group">
-                     <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-indigo-600">{ad.title}</h3>
-                     <p className="text-gray-600 text-sm mb-4 line-clamp-2">{ad.content}</p>
-                     <div className="flex flex-col space-y-2 text-sm text-gray-500 border-t pt-3">
-                        <div className="flex items-center justify-between">
-                           <div className="flex items-center gap-1"><MapPin size={14} className="text-indigo-500" /><span>{ad.location}</span></div>
-                           <div className="flex items-center gap-1 font-bold text-gray-900"><DollarSign size={14} className="text-green-600" /><span>{ad.price}</span></div>
-                        </div>
+                  <div key={ad.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow group">
+                     <h3 className="text-xl font-bold text-gray-900 mb-2 group-hover:text-indigo-600">{ad.title}</h3>
+                     <p className="text-gray-500 text-sm mb-6 line-clamp-2 leading-relaxed">{ad.content}</p>
+                     <div className="flex items-center justify-between border-t border-gray-50 pt-4">
+                        <div className="flex items-center gap-1.5 text-gray-400 text-[10px] font-black uppercase tracking-widest"><MapPin size={14} />{ad.location}</div>
+                        <div className="text-emerald-600 font-black text-sm">{ad.price}</div>
                      </div>
                   </div>
                 ))}
              </div>
           )}
-        </div>
-        <div className="w-full lg:w-80 flex-shrink-0">
-           <div className="bg-gray-100 rounded-xl h-96 flex items-center justify-center text-gray-400 border border-gray-200 sticky top-24">
-               <span className="font-bold opacity-20 rotate-[-12deg] text-3xl">AD SPACE</span>
-           </div>
         </div>
       </div>
     </div>
@@ -180,7 +128,6 @@ const Home: React.FC = () => {
 
 const App: React.FC = () => {
   const [epaperPages, setEpaperPages] = useState<EPaperPage[]>([]);
-  
   useEffect(() => {
     supabase.from('epaper_pages').select('*').then(({ data }) => {
       if (data && data.length > 0) {
@@ -194,7 +141,6 @@ const App: React.FC = () => {
   return (
     <AuthProvider>
       <HashRouter>
-        <AuthListener />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
@@ -210,5 +156,4 @@ const App: React.FC = () => {
     </AuthProvider>
   );
 };
-
 export default App;

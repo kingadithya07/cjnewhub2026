@@ -10,6 +10,7 @@ interface AuthContextType extends AuthState {
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
   verifyAccount: (email: string, code: string) => Promise<{success: boolean, error?: string}>;
   requestResetCode: (email: string) => Promise<{success: boolean, error?: string, requiresPrimaryApproval?: boolean}>;
+  checkResetStatus: (email: string) => Promise<{approved: boolean, error?: string}>;
   resetPasswordWithCode: (email: string, code: string, newPassword: string) => Promise<{success: boolean, error?: string}>;
   refreshDeviceStatus: () => Promise<void>;
   approveDevice: (deviceId: string) => Promise<void>;
@@ -38,7 +39,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       return deviceData?.status === 'APPROVED';
     } catch (e) {
-      return true; // Fallback for dev
+      return true; 
     }
   };
 
@@ -59,10 +60,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
-
-  const showInternalCode = (type: string, email: string, code: string) => {
-    alert(`SECURITY ALERT: ${type}\nTarget: ${email}\n\nCode: ${code}\n\n(This code is also logged in the Security Hub)`);
-  };
 
   const registerDevice = async (profileId: string) => {
     const currentId = getDeviceId();
@@ -114,7 +111,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       verification_code: code, code_expiry: expiry
     });
     if (error) return { success: false, error: error.message };
-    showInternalCode("REGISTRATION", email, code);
     return { success: true };
   };
 
@@ -147,14 +143,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       reset_approval_status: isPrimary ? 'APPROVED' : 'PENDING'
     }).eq('email', email);
 
-    if (error) return { success: false, error: "System synchronization error." };
-
-    if (!isPrimary) {
-      return { success: true, requiresPrimaryApproval: true };
+    if (error) {
+        console.error("Supabase Reset Update Error:", error);
+        return { success: false, error: "Security layer error. Contact Admin." };
     }
 
-    showInternalCode("PASSWORD RESET", email, code);
-    return { success: true };
+    return { success: true, requiresPrimaryApproval: !isPrimary };
+  };
+
+  const checkResetStatus = async (email: string) => {
+      const { data, error } = await supabase.from('profiles').select('reset_approval_status').eq('email', email).maybeSingle();
+      if (error) return { approved: false, error: error.message };
+      return { approved: data?.reset_approval_status === 'APPROVED' };
   };
 
   const resetPasswordWithCode = async (email: string, code: string, newPassword: string) => {
@@ -173,11 +173,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const approveResetRequest = async (profileId: string) => {
-    const { data: profile } = await supabase.from('profiles').select('verification_code').eq('id', profileId).maybeSingle();
     await supabase.from('profiles').update({ reset_approval_status: 'APPROVED' }).eq('id', profileId);
-    if (profile?.verification_code) {
-       alert(`RESET APPROVED\n\nThe 6-digit code for this user is: ${profile.verification_code}\n\nProvide this code to the requester.`);
-    }
   };
 
   const approveDevice = async (targetDeviceId: string) => {
@@ -216,7 +212,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     <AuthContext.Provider value={{ 
       ...auth, 
       login, logout, register, verifyAccount,
-      requestResetCode, 
+      requestResetCode, checkResetStatus,
       resetPasswordWithCode,
       refreshDeviceStatus,
       approveDevice,
