@@ -9,7 +9,7 @@ interface AuthContextType extends AuthState {
   logout: () => void;
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
   verifyAccount: (email: string, code: string) => Promise<{success: boolean, error?: string}>;
-  requestResetCode: (email: string) => Promise<{success: boolean, error?: string, requiresPrimaryApproval?: boolean, devCode?: string}>;
+  requestResetCode: (email: string) => Promise<{success: boolean, error?: string, requiresPrimaryApproval?: boolean, devCode?: string, profileId?: string}>;
   checkResetStatus: (email: string) => Promise<{approved: boolean, error?: string}>;
   resetPasswordWithCode: (email: string, code: string, newPassword: string) => Promise<{success: boolean, error?: string}>;
   refreshDeviceStatus: () => Promise<void>;
@@ -42,6 +42,38 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return true; 
     }
   };
+
+  const refreshDeviceStatus = async () => {
+    if (auth.user) {
+      const approved = await checkDeviceStatus(auth.user.id);
+      setAuth(prev => ({ ...prev, isDeviceApproved: approved }));
+    }
+  };
+
+  // Realtime Listener for Device Approval
+  useEffect(() => {
+    if (!auth.user) return;
+
+    const channel = supabase.channel('device_sync')
+      .on(
+        'postgres_changes',
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'user_devices',
+          filter: `profile_id=eq.${auth.user.id}`
+        }, 
+        () => {
+          console.log('Realtime Device Update Received');
+          refreshDeviceStatus();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [auth.user]);
 
   useEffect(() => {
     const init = async () => {
@@ -153,11 +185,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // If Primary, return code immediately for UI display (Simulates email)
     if (isPrimary) {
-        console.log("Primary Device Reset - Auto Approving");
-        return { success: true, requiresPrimaryApproval: false, devCode: code };
+        return { success: true, requiresPrimaryApproval: false, devCode: code, profileId: profile.id };
     }
 
-    return { success: true, requiresPrimaryApproval: true };
+    return { success: true, requiresPrimaryApproval: true, profileId: profile.id };
   };
 
   const checkResetStatus = async (email: string) => {
@@ -208,13 +239,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const logout = () => {
     localStorage.removeItem('newsflow_session');
     setAuth({ user: null, isAuthenticated: false, isDeviceApproved: false });
-  };
-
-  const refreshDeviceStatus = async () => {
-    if (auth.user) {
-      const approved = await checkDeviceStatus(auth.user.id);
-      setAuth(prev => ({ ...prev, isDeviceApproved: approved }));
-    }
   };
 
   return (

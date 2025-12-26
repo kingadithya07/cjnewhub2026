@@ -88,18 +88,44 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => { loadData(); }, [user]);
 
-  // Poll for updates if on Devices tab
+  // Realtime Subscription for Security Updates (Push instead of Poll)
   useEffect(() => {
-    if (activeTab === 'DEVICES') {
-        const interval = setInterval(refreshSecurityData, 3000);
-        return () => clearInterval(interval);
-    }
-  }, [activeTab]);
+    if (!user) return;
+
+    // Listen for changes to MY profile (Reset Requests)
+    const profileChannel = supabase.channel('dashboard_profile_sync')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        () => {
+            console.log('Profile update detected');
+            refreshSecurityData();
+        }
+      )
+      .subscribe();
+
+    // Listen for changes to MY devices (Device Requests)
+    const deviceChannel = supabase.channel('dashboard_device_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'user_devices', filter: `profile_id=eq.${user.id}` },
+        () => {
+            console.log('Device update detected');
+            refreshSecurityData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+        supabase.removeChannel(profileChannel);
+        supabase.removeChannel(deviceChannel);
+    };
+  }, [user]);
 
   const handleApproveReset = async () => {
       if (!user) return;
       await approveResetRequest(user.id);
-      await refreshSecurityData();
+      // Realtime listener will catch the update and refresh UI
   };
 
   if (!user) return <div className="p-20 text-center font-black text-gray-400 uppercase tracking-widest">Access Denied</div>;
@@ -217,7 +243,7 @@ export const Dashboard: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     <div className="col-span-full flex justify-end">
                          <button onClick={refreshSecurityData} className="text-[10px] font-black text-gray-400 flex items-center gap-1 hover:text-indigo-600 uppercase tracking-widest">
-                            <RefreshCw size={12} /> Refresh Status
+                            <RefreshCw size={12} /> Status: Live
                          </button>
                     </div>
                     {devices.map(device => {

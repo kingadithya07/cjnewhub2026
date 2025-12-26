@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../modules/auth/AuthContext';
+import { supabase } from '../services/supabaseClient';
 import { Lock, KeyRound, AlertCircle, ShieldCheck, ArrowRight, Mail, ArrowLeft, RefreshCw, Smartphone, Search } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
@@ -12,6 +13,7 @@ export const ResetPassword: React.FC = () => {
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
+  const [profileId, setProfileId] = useState<string | null>(null);
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -24,6 +26,26 @@ export const ResetPassword: React.FC = () => {
     }
   }, []);
 
+  // Realtime Listener for Approval
+  useEffect(() => {
+      if (step !== 'PENDING_APPROVAL' || !profileId) return;
+
+      const channel = supabase.channel('reset_approval_sync')
+        .on(
+            'postgres_changes', 
+            { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${profileId}` }, 
+            (payload) => {
+                const newStatus = payload.new.reset_approval_status;
+                if (newStatus === 'APPROVED') {
+                    setStep('CODE');
+                }
+            }
+        )
+        .subscribe();
+
+      return () => { supabase.removeChannel(channel); };
+  }, [step, profileId]);
+
   const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -32,6 +54,8 @@ export const ResetPassword: React.FC = () => {
     setLoading(false);
     
     if (res.success) {
+      if (res.profileId) setProfileId(res.profileId);
+      
       if (res.devCode) {
          // Show code immediately if Primary Device (Simulating Email)
          alert(`SIMULATED EMAIL\n\nReset Code: ${res.devCode}\n\n(In production, this goes to your email)`);
@@ -117,7 +141,7 @@ export const ResetPassword: React.FC = () => {
                <button onClick={verifyStatus} disabled={loading} className="w-full bg-orange-600 text-white font-black py-5 rounded-2xl shadow-xl flex items-center justify-center gap-3 uppercase text-xs tracking-widest">
                   {loading ? <RefreshCw className="animate-spin" /> : <><Search size={18} /> Check Approval Status</>}
                </button>
-               <p className="text-[9px] text-gray-400 uppercase tracking-widest">Refresh after approving on primary device</p>
+               <p className="text-[9px] text-gray-400 uppercase tracking-widest">Status: Monitoring Realtime Updates...</p>
             </div>
           )}
 
