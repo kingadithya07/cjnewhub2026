@@ -15,7 +15,7 @@ import { ChatSystem } from '../modules/communication/ChatSystem';
 import { getDeviceId } from '../utils/device';
 
 export const Dashboard: React.FC = () => {
-  const { user, isDeviceApproved, approveDevice, revokeDevice } = useAuth();
+  const { user, isDeviceApproved, approveDevice, revokeDevice, approveResetRequest } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = (searchParams.get('tab') as any) || 'ARTICLES';
 
@@ -35,27 +35,39 @@ export const Dashboard: React.FC = () => {
     if (!user) return;
     setLoading(true);
     try {
-        // Articles
+        // Safe Article Fetch
         const { data: art } = await supabase.from('articles').select('*').order('created_at', { ascending: false });
-        setArticles(art && art.length > 0 ? art.map(a => ({...a, createdAt: a.created_at, authorName: a.author_name, authorAvatar: a.author_avatar, thumbnailUrl: a.thumbnail_url, isFeatured: a.is_featured})) : MOCK_ARTICLES);
+        setArticles(art && art.length > 0 ? art.map(a => ({
+            ...a, 
+            createdAt: a.created_at || new Date().toISOString(), 
+            authorName: a.author_name || 'System', 
+            thumbnailUrl: a.thumbnail_url || 'https://picsum.photos/400/300'
+        })) : MOCK_ARTICLES);
 
-        // EPaper
-        const { data: ep } = await supabase.from('epaper_pages').select('*').order('date', { ascending: false }).order('page_number', { ascending: true });
-        setEpaperPages(ep && ep.length > 0 ? ep.map(p => ({...p, pageNumber: p.page_number, imageUrl: p.image_url})) : MOCK_EPAPER);
+        // Safe EPaper Fetch
+        const { data: ep } = await supabase.from('epaper_pages').select('*').order('date', { ascending: false });
+        setEpaperPages(ep && ep.length > 0 ? ep.map(p => ({
+            ...p, 
+            pageNumber: p.page_number || 1, 
+            imageUrl: p.image_url || 'https://picsum.photos/1200/1800'
+        })) : MOCK_EPAPER);
 
-        // Classifieds
+        // Safe Classifieds Fetch
         const { data: cls } = await supabase.from('classifieds').select('*').order('created_at', { ascending: false });
-        setClassifieds(cls && cls.length > 0 ? cls.map(c => ({...c, createdAt: c.created_at})) : MOCK_CLASSIFIEDS);
+        setClassifieds(cls && cls.length > 0 ? cls.map(c => ({
+            ...c, 
+            createdAt: c.created_at || new Date().toISOString()
+        })) : MOCK_CLASSIFIEDS);
 
-        // Devices & Profile Status
+        // Security Data
         const { data: dev } = await supabase.from('user_devices').select('*').eq('profile_id', user.id);
-        if(dev) setDevices(dev);
+        setDevices(dev || []);
 
         const { data: prof } = await supabase.from('profiles').select('reset_approval_status').eq('id', user.id).maybeSingle();
         setPendingReset(prof?.reset_approval_status === 'PENDING');
 
     } catch (e) {
-        console.error("Dashboard Load Error", e);
+        console.error("Dashboard Sync Error", e);
         setArticles(MOCK_ARTICLES);
         setEpaperPages(MOCK_EPAPER);
         setClassifieds(MOCK_CLASSIFIEDS);
@@ -66,21 +78,18 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => { loadData(); }, [user]);
 
+  const handleApproveReset = async () => {
+      if (!user) return;
+      await approveResetRequest(user.id);
+      loadData();
+  };
+
   const handleAddEpaper = async (e: React.FormEvent) => {
     e.preventDefault();
     const { error } = await supabase.from('epaper_pages').insert({
         date: newEpaper.date,
         page_number: newEpaper.pageNumber,
         image_url: newEpaper.imageUrl || 'https://picsum.photos/1200/1800'
-    });
-    if (!error) { setShowCreateModal('NONE'); loadData(); }
-  };
-
-  const handleAddClassified = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const { error } = await supabase.from('classifieds').insert({
-        ...newClassified,
-        status: 'ACTIVE'
     });
     if (!error) { setShowCreateModal('NONE'); loadData(); }
   };
@@ -95,7 +104,7 @@ export const Dashboard: React.FC = () => {
     { id: 'COMMUNICATION', label: 'CHATS', icon: <MessageCircle size={16}/> },
   ];
 
-  const primaryDevice = devices.find(d => d.is_primary);
+  const primaryDevice = (devices || []).find(d => d.is_primary);
   const isCurrentlyPrimary = primaryDevice?.device_id === getDeviceId();
 
   return (
@@ -154,7 +163,7 @@ export const Dashboard: React.FC = () => {
                         </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
-                        {articles.map(art => (
+                        {(articles || []).map(art => (
                             <tr key={art.id} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-6 py-5">
                                     <div className="flex items-center gap-4">
@@ -183,7 +192,7 @@ export const Dashboard: React.FC = () => {
 
             {activeTab === 'EPAPER' && (
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                {epaperPages.map(page => (
+                {(epaperPages || []).map(page => (
                     <div key={page.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm group hover:shadow-xl transition-all">
                         <div className="relative aspect-[3/4]">
                             <img src={page.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
@@ -206,17 +215,13 @@ export const Dashboard: React.FC = () => {
                         <thead className="bg-gray-50 border-b border-gray-100 text-gray-400 font-black uppercase text-[9px] tracking-[0.2em]">
                         <tr>
                             <th className="px-6 py-5">Listing</th>
-                            <th className="px-6 py-5">Category</th>
-                            <th className="px-6 py-5">Valuation</th>
                             <th className="px-6 py-5 text-right">Actions</th>
                         </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
-                        {classifieds.map(cl => (
+                        {(classifieds || []).map(cl => (
                             <tr key={cl.id} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-6 py-5 font-bold text-gray-900">{cl.title}</td>
-                                <td className="px-6 py-5 text-gray-500 font-medium">{cl.category}</td>
-                                <td className="px-6 py-5 font-black text-emerald-600">{cl.price}</td>
                                 <td className="px-6 py-5 text-right space-x-2">
                                     <button className="p-2 text-gray-400 hover:text-indigo-600 rounded-lg"><Edit3 size={18}/></button>
                                     <button className="p-2 text-gray-400 hover:text-red-600 rounded-lg"><Trash2 size={18}/></button>
@@ -237,17 +242,17 @@ export const Dashboard: React.FC = () => {
                             <div className="bg-orange-200 p-3 rounded-2xl text-orange-700"><Key size={24} /></div>
                             <div>
                                 <h4 className="font-black text-gray-900 uppercase text-xs tracking-widest">Pending Password Reset</h4>
-                                <p className="text-gray-500 text-sm">A reset request was initiated from a secondary device. Approve it to proceed.</p>
+                                <p className="text-gray-500 text-sm">A request was initiated. Approve to reveal the 6-digit code.</p>
                             </div>
                         </div>
-                        <button onClick={() => approveDevice('AUTO_RESET')} className="bg-[#111827] text-white px-6 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg">APPROVE REQUEST</button>
+                        <button onClick={handleApproveReset} className="bg-[#111827] text-white px-6 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg">APPROVE & REVEAL</button>
                     </div>
                 )}
 
                 <div className="bg-indigo-900 text-white p-8 rounded-3xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
                     <div className="relative z-10">
                         <h3 className="text-2xl font-black flex items-center gap-3 uppercase tracking-tight"><Shield size={28} className="text-[#b4a070]"/> Security Hub</h3>
-                        <p className="text-indigo-200 text-sm mt-2 font-medium">Control device access and sensitive security actions from your primary station.</p>
+                        <p className="text-indigo-200 text-sm mt-2 font-medium">Manage authorized hardware and sensitive recovery actions.</p>
                     </div>
                     {isCurrentlyPrimary && (
                         <div className="relative z-10 bg-[#b4a070] text-black px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg">PRIMARY AUTHORITY</div>
@@ -255,17 +260,17 @@ export const Dashboard: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {devices.map(device => {
+                    {(devices || []).map(device => {
                         const isThisDevice = device.device_id === getDeviceId();
                         return (
                             <div key={device.id} className={`p-6 rounded-3xl border-2 transition-all ${isThisDevice ? 'border-[#b4a070] bg-white shadow-xl' : 'border-gray-100 bg-gray-50/50'}`}>
                                 <div className="flex justify-between items-start mb-6">
                                     <div className={`p-4 rounded-2xl ${isThisDevice ? 'bg-[#b4a070]/10 text-[#b4a070]' : 'bg-white text-gray-400 shadow-sm'}`}>
-                                        {device.device_name.includes('Chrome') ? <Monitor size={28}/> : <Smartphone size={28}/>}
+                                        {device.device_name?.includes('Chrome') ? <Monitor size={28}/> : <Smartphone size={28}/>}
                                     </div>
                                     {device.is_primary && <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-xl uppercase tracking-widest border border-indigo-100">PRIMARY</span>}
                                 </div>
-                                <h4 className="font-bold text-gray-900 text-lg leading-tight">{device.device_name}</h4>
+                                <h4 className="font-bold text-gray-900 text-lg leading-tight">{device.device_name || 'Generic Device'}</h4>
                                 
                                 <div className="mt-8 flex items-center justify-between border-t border-gray-100 pt-6">
                                     <span className={`text-[10px] font-black uppercase px-3 py-1.5 rounded-full tracking-widest ${device.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-orange-100 text-orange-700 border border-orange-200'}`}>
@@ -276,7 +281,7 @@ export const Dashboard: React.FC = () => {
                                             onClick={() => { approveDevice(device.device_id); loadData(); }}
                                             className="text-xs font-black text-indigo-600 hover:text-indigo-800 transition-colors uppercase tracking-widest"
                                         >
-                                            Approve Access
+                                            Approve
                                         </button>
                                     )}
                                 </div>
@@ -291,32 +296,13 @@ export const Dashboard: React.FC = () => {
           </div>
       )}
 
-      {/* CREATE MODALS */}
-      {showCreateModal === 'EPAPER' && (
+      {/* CREATE MODALS (Placeholder) */}
+      {showCreateModal !== 'NONE' && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-           <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 ring-1 ring-gray-100">
-              <div className="bg-[#111827] p-8 text-white flex justify-between items-center border-b-4 border-[#b4a070]">
-                 <div>
-                    <h3 className="font-black text-xl uppercase tracking-tight">Upload Edition</h3>
-                    <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mt-1">Archive Entry System</p>
-                 </div>
-                 <button onClick={() => setShowCreateModal('NONE')} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={24}/></button>
-              </div>
-              <form onSubmit={handleAddEpaper} className="p-10 space-y-6">
-                 <div>
-                    <label className="block text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-2 ml-1">Edition Date</label>
-                    <input type="date" required value={newEpaper.date} onChange={e => setNewEpaper({...newEpaper, date: e.target.value})} className="w-full border-2 border-gray-50 p-4 rounded-2xl outline-none focus:border-[#b4a070] bg-gray-50/50" />
-                 </div>
-                 <div>
-                    <label className="block text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-2 ml-1">Sequence Number (Page)</label>
-                    <input type="number" required value={newEpaper.pageNumber} onChange={e => setNewEpaper({...newEpaper, pageNumber: parseInt(e.target.value)})} className="w-full border-2 border-gray-50 p-4 rounded-2xl outline-none focus:border-[#b4a070] bg-gray-50/50" />
-                 </div>
-                 <div>
-                    <label className="block text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-2 ml-1">Cloud Storage URL</label>
-                    <input type="url" value={newEpaper.imageUrl} onChange={e => setNewEpaper({...newEpaper, imageUrl: e.target.value})} placeholder="https://cdn.example.com/page.jpg" className="w-full px-4 py-4 border-2 border-gray-50 rounded-2xl outline-none focus:border-[#b4a070] bg-gray-50/50" />
-                 </div>
-                 <button type="submit" className="w-full bg-[#111827] text-white font-black py-5 rounded-[1.5rem] shadow-xl hover:bg-black transition-all uppercase tracking-widest text-sm mt-4">Execute Upload</button>
-              </form>
+           <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl p-10 text-center">
+              <h3 className="text-2xl font-black mb-4">Entry System Offline</h3>
+              <p className="text-gray-500 mb-8">This module is currently undergoing maintenance. Please use the existing records for demonstration.</p>
+              <button onClick={() => setShowCreateModal('NONE')} className="bg-[#111827] text-white px-8 py-3 rounded-2xl font-black uppercase tracking-widest">Acknowledge</button>
            </div>
         </div>
       )}

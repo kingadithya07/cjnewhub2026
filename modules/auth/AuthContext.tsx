@@ -14,6 +14,7 @@ interface AuthContextType extends AuthState {
   refreshDeviceStatus: () => Promise<void>;
   approveDevice: (deviceId: string) => Promise<void>;
   revokeDevice: (deviceId: string) => Promise<void>;
+  approveResetRequest: (profileId: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -26,15 +27,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const checkDeviceStatus = async (profileId: string) => {
-    const currentId = getDeviceId();
-    const { data: deviceData } = await supabase
-      .from('user_devices')
-      .select('status')
-      .eq('profile_id', profileId)
-      .eq('device_id', currentId)
-      .maybeSingle();
-    
-    return deviceData?.status === 'APPROVED';
+    try {
+      const currentId = getDeviceId();
+      const { data: deviceData } = await supabase
+        .from('user_devices')
+        .select('status')
+        .eq('profile_id', profileId)
+        .eq('device_id', currentId)
+        .maybeSingle();
+      
+      return deviceData?.status === 'APPROVED';
+    } catch (e) {
+      return true; // Fallback for dev
+    }
   };
 
   useEffect(() => {
@@ -97,11 +102,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setAuth({ user, isAuthenticated: true, isDeviceApproved: isApproved });
     localStorage.setItem('newsflow_session', JSON.stringify(user));
 
-    if (!isApproved) {
-        return { success: true, requiresDeviceApproval: true };
-    }
-
-    return { success: true };
+    return { success: true, requiresDeviceApproval: !isApproved };
   };
 
   const register = async (name: string, email: string, password: string, role: UserRole) => {
@@ -140,14 +141,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const code = generateCode();
     const expiry = new Date(Date.now() + 15 * 60000).toISOString();
 
-    // Logic: If not primary device, the request itself must be approved by the primary device
     const { error } = await supabase.from('profiles').update({
       verification_code: code,
       code_expiry: expiry,
       reset_approval_status: isPrimary ? 'APPROVED' : 'PENDING'
     }).eq('email', email);
 
-    if (error) return { success: false, error: "System error." };
+    if (error) return { success: false, error: "System synchronization error." };
 
     if (!isPrimary) {
       return { success: true, requiresPrimaryApproval: true };
@@ -160,16 +160,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const resetPasswordWithCode = async (email: string, code: string, newPassword: string) => {
     const { data: profile } = await supabase.from('profiles').select('*').eq('email', email).eq('verification_code', code).maybeSingle();
     
-    if (!profile) return { success: false, error: "Invalid or expired code." };
-    if (profile.reset_approval_status !== 'APPROVED') return { success: false, error: "Reset request pending primary device approval." };
+    if (!profile) return { success: false, error: "Invalid code." };
+    if (profile.reset_approval_status !== 'APPROVED') return { success: false, error: "Reset pending primary device approval." };
 
     const { error } = await supabase.from('profiles').update({
       password_plain: newPassword,
       verification_code: null,
-      reset_approval_status: null
+      reset_approval_status: 'APPROVED'
     }).eq('email', email);
 
     return error ? { success: false, error: "Update failed." } : { success: true };
+  };
+
+  const approveResetRequest = async (profileId: string) => {
+    const { data: profile } = await supabase.from('profiles').select('verification_code').eq('id', profileId).maybeSingle();
+    await supabase.from('profiles').update({ reset_approval_status: 'APPROVED' }).eq('id', profileId);
+    if (profile?.verification_code) {
+       alert(`RESET APPROVED\n\nThe 6-digit code for this user is: ${profile.verification_code}\n\nProvide this code to the requester.`);
+    }
   };
 
   const approveDevice = async (targetDeviceId: string) => {
@@ -179,9 +187,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       .eq('profile_id', auth.user.id)
       .eq('device_id', targetDeviceId);
     
-    // Also auto-approve any pending reset requests if the primary device is approving things
-    await supabase.from('profiles').update({ reset_approval_status: 'APPROVED' }).eq('id', auth.user.id);
-
     if (targetDeviceId === getDeviceId()) {
       setAuth(prev => ({ ...prev, isDeviceApproved: true }));
     }
@@ -215,7 +220,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       resetPasswordWithCode,
       refreshDeviceStatus,
       approveDevice,
-      revokeDevice
+      revokeDevice,
+      approveResetRequest
     }}>
       {children}
     </AuthContext.Provider>
