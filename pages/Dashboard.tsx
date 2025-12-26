@@ -15,7 +15,7 @@ import { ChatSystem } from '../modules/communication/ChatSystem';
 import { getDeviceId } from '../utils/device';
 
 export const Dashboard: React.FC = () => {
-  const { user, isDeviceApproved, approveDevice, revokeDevice, approveResetRequest } = useAuth();
+  const { user, isDeviceApproved, approveDevice, revokeDevice, approveResetRequest, claimPrimaryDevice } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = (searchParams.get('tab') as any) || 'ARTICLES';
 
@@ -130,6 +130,11 @@ export const Dashboard: React.FC = () => {
       setTimeout(refreshSecurityData, 500);
   };
 
+  const handleClaimPrimary = async () => {
+      await claimPrimaryDevice();
+      await loadData(); // Reload all data to reflect new status
+  };
+
   if (!user) return <div className="p-20 text-center font-black text-gray-400 uppercase tracking-widest">Access Denied</div>;
 
   const tabs = [
@@ -220,16 +225,24 @@ export const Dashboard: React.FC = () => {
                 {/* PRIMARY DEVICE INDICATOR */}
                 <div className={`p-4 rounded-xl text-xs font-black uppercase tracking-widest flex justify-between items-center ${isCurrentlyPrimary ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
                     <span className="flex items-center gap-2">
-                        {isCurrentlyPrimary ? <CheckCircle size={16} className="text-[#b4a070]" /> : <XCircle size={16} />}
+                        {isCurrentlyPrimary ? <CheckCircle size={16} className="text-[#b4a070]" /> : <AlertTriangle size={16} />}
                         {isCurrentlyPrimary ? 'THIS IS THE PRIMARY HUB' : 'THIS IS A SECONDARY VIEWER'}
                     </span>
                     <div className="flex items-center gap-4">
                         <span className="opacity-50 text-[9px]">ID: {getDeviceId().substring(0, 8)}...</span>
-                        <button onClick={refreshSecurityData} className="flex items-center gap-1 hover:text-[#b4a070]"><RefreshCw size={12} /> Sync Requests</button>
+                        
+                        {/* FIX: Claim Primary Button if locked out */}
+                        {!isCurrentlyPrimary && (
+                           <button onClick={handleClaimPrimary} className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-indigo-700 transition-colors shadow-lg border border-white/20 animate-pulse">
+                              SET AS PRIMARY HUB
+                           </button>
+                        )}
+
+                        <button onClick={refreshSecurityData} className="flex items-center gap-1 hover:text-[#b4a070]"><RefreshCw size={12} /> Sync</button>
                     </div>
                 </div>
 
-                {/* Reset Approval Section - Logic Relaxed to Show Even if Code is Hidden */}
+                {/* Reset Approval Section */}
                 {(resetStatus === 'PENDING' || resetStatus === 'APPROVED') && (
                     <div className="bg-orange-50 border-2 border-orange-200 p-8 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl animate-in zoom-in-95">
                         <div className="flex items-center gap-5">

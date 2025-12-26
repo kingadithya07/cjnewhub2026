@@ -16,6 +16,7 @@ interface AuthContextType extends AuthState {
   approveDevice: (deviceId: string) => Promise<void>;
   revokeDevice: (deviceId: string) => Promise<void>;
   approveResetRequest: (profileId: string) => Promise<void>;
+  claimPrimaryDevice: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -137,7 +138,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             isPrimary = true;
             status = 'APPROVED';
         } else if (!hasExistingPrimary) {
-            // Devices exist but NO primary? (Shouldn't happen, but just in case). Claim Primary.
+            // Devices exist but NO primary? Claim Primary.
             isPrimary = true;
             status = 'APPROVED';
         } else {
@@ -162,6 +163,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     return status === 'APPROVED';
+  };
+
+  const claimPrimaryDevice = async () => {
+    if (!auth.user) return;
+    
+    // 1. DELETE ALL existing devices for this user to effectively "Reset" security
+    await supabase.from('user_devices').delete().eq('profile_id', auth.user.id);
+    await supabase.from('profiles').update({ primary_device_id: null }).eq('id', auth.user.id);
+
+    // 2. Re-register current device (Logic will now see 0 devices and make this Primary)
+    await registerDevice(auth.user.id);
+    
+    // 3. Update local state
+    refreshDeviceStatus();
   };
 
   const login = async (email: string, password?: string) => {
@@ -276,7 +291,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       .eq('profile_id', auth.user.id)
       .eq('device_id', targetDeviceId);
     
-    // If we just approved OURSELVES (rare but possible via another screen), update state
     if (targetDeviceId === getDeviceId()) {
       setAuth(prev => ({ ...prev, isDeviceApproved: true }));
     }
@@ -304,7 +318,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       refreshDeviceStatus,
       approveDevice,
       revokeDevice,
-      approveResetRequest
+      approveResetRequest,
+      claimPrimaryDevice
     }}>
       {children}
     </AuthContext.Provider>
