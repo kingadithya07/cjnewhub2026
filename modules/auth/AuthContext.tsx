@@ -13,6 +13,7 @@ interface AuthContextType extends AuthState {
   resetPasswordWithCode: (email: string, code: string, newPassword: string) => Promise<{success: boolean, error?: string}>;
   refreshDeviceStatus: () => Promise<void>;
   approveDevice: (deviceId: string) => Promise<void>;
+  revokeDevice: (deviceId: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -24,24 +25,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isDeviceApproved: false
   });
 
+  const checkDeviceStatus = async (profileId: string) => {
+    const currentId = getDeviceId();
+    const { data: deviceData } = await supabase
+      .from('user_devices')
+      .select('status')
+      .eq('profile_id', profileId)
+      .eq('device_id', currentId)
+      .maybeSingle();
+    
+    return deviceData?.status === 'APPROVED';
+  };
+
   useEffect(() => {
     const init = async () => {
       const savedUser = localStorage.getItem('newsflow_session');
       if (savedUser) {
         try {
           const user = JSON.parse(savedUser);
-          const { data: deviceData } = await supabase
-            .from('user_devices')
-            .select('status')
-            .eq('profile_id', user.id)
-            .eq('device_id', getDeviceId())
-            .maybeSingle();
-            
-          setAuth({ 
-            user, 
-            isAuthenticated: true, 
-            isDeviceApproved: deviceData?.status === 'APPROVED' 
-          });
+          const approved = await checkDeviceStatus(user.id);
+          setAuth({ user, isAuthenticated: true, isDeviceApproved: approved });
         } catch (e) {
           localStorage.removeItem('newsflow_session');
         }
@@ -67,7 +70,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const isFirstDevice = !devices || devices.length === 0;
 
-    const { error } = await supabase.from('user_devices').upsert({
+    await supabase.from('user_devices').upsert({
       profile_id: profileId,
       device_id: currentId,
       device_name: currentName,
@@ -77,7 +80,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     if (isFirstDevice) {
-        await supabase.from('profiles').update({ primary_device_id: currentId }).eq('id', profileId);
+      await supabase.from('profiles').update({ primary_device_id: currentId }).eq('id', profileId);
     }
 
     return isFirstDevice || devices?.find(d => d.device_id === currentId)?.status === 'APPROVED';
@@ -91,12 +94,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const isApproved = await registerDevice(data.id);
     const user: User = { id: data.id, name: data.name, email: data.email, role: data.role as UserRole, avatar: data.avatar };
     
+    setAuth({ user, isAuthenticated: true, isDeviceApproved: isApproved });
+    localStorage.setItem('newsflow_session', JSON.stringify(user));
+
     if (!isApproved) {
-        return { success: false, requiresDeviceApproval: true };
+        return { success: true, requiresDeviceApproval: true };
     }
 
-    setAuth({ user, isAuthenticated: true, isDeviceApproved: true });
-    localStorage.setItem('newsflow_session', JSON.stringify(user));
     return { success: true };
   };
 
@@ -118,7 +122,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!data) return { success: false, error: "Invalid code." };
     
     await supabase.from('profiles').update({ is_verified: true, verification_code: null }).eq('email', email);
-    await registerDevice(data.id); // First device after verify is primary
+    await registerDevice(data.id); 
     
     const user: User = { id: data.id, name: data.name, email: data.email, role: data.role as UserRole, avatar: data.avatar };
     setAuth({ user, isAuthenticated: true, isDeviceApproved: true });
@@ -127,16 +131,36 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const approveDevice = async (targetDeviceId: string) => {
-      if (!auth.user || !auth.isDeviceApproved) return;
-      await supabase.from('user_devices')
-        .update({ status: 'APPROVED' })
-        .eq('profile_id', auth.user.id)
-        .eq('device_id', targetDeviceId);
+    if (!auth.user) return;
+    await supabase.from('user_devices')
+      .update({ status: 'APPROVED' })
+      .eq('profile_id', auth.user.id)
+      .eq('device_id', targetDeviceId);
+    
+    // Refresh local state if current device was approved
+    if (targetDeviceId === getDeviceId()) {
+      setAuth(prev => ({ ...prev, isDeviceApproved: true }));
+    }
+  };
+
+  const revokeDevice = async (targetDeviceId: string) => {
+    if (!auth.user) return;
+    await supabase.from('user_devices')
+      .update({ status: 'REVOKED' })
+      .eq('profile_id', auth.user.id)
+      .eq('device_id', targetDeviceId);
   };
 
   const logout = () => {
     localStorage.removeItem('newsflow_session');
     setAuth({ user: null, isAuthenticated: false, isDeviceApproved: false });
+  };
+
+  const refreshDeviceStatus = async () => {
+    if (auth.user) {
+      const approved = await checkDeviceStatus(auth.user.id);
+      setAuth(prev => ({ ...prev, isDeviceApproved: approved }));
+    }
   };
 
   return (
@@ -145,8 +169,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       login, logout, register, verifyAccount,
       requestResetCode: async () => ({success:false}), 
       resetPasswordWithCode: async () => ({success:false}),
-      refreshDeviceStatus: async () => {},
-      approveDevice
+      refreshDeviceStatus,
+      approveDevice,
+      revokeDevice
     }}>
       {children}
     </AuthContext.Provider>
