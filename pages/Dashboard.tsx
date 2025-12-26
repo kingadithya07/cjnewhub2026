@@ -7,7 +7,7 @@ import {
   Plus, Edit3, Trash2, CheckCircle, Clock, XCircle, 
   FileText, Scissors, Layout, Save, X, Star, Settings, MessageCircle, 
   Shield, Smartphone, AlertTriangle, User as UserIcon, Database, Check, 
-  Newspaper, Store, Calendar, Image as ImageIcon, Monitor, Lock, ArrowRight, Loader2, Key, Copy
+  Newspaper, Store, Calendar, Image as ImageIcon, Monitor, Lock, ArrowRight, Loader2, Key, Copy, RefreshCw
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { MOCK_ARTICLES, MOCK_EPAPER, MOCK_CLASSIFIEDS } from '../services/mockData';
@@ -24,7 +24,10 @@ export const Dashboard: React.FC = () => {
   const [epaperPages, setEpaperPages] = useState<EPaperPage[]>([]);
   const [classifieds, setClassifieds] = useState<Classified[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  
+  // Pending Reset Logic
   const [pendingResetCode, setPendingResetCode] = useState<string | null>(null);
+  const [resetStatus, setResetStatus] = useState<'NONE' | 'PENDING' | 'APPROVED'>('NONE');
 
   const [showCreateModal, setShowCreateModal] = useState<'NONE' | 'ARTICLE' | 'EPAPER' | 'CLASSIFIED'>('NONE');
 
@@ -53,15 +56,8 @@ export const Dashboard: React.FC = () => {
             createdAt: c.created_at || new Date().toISOString()
         })) : MOCK_CLASSIFIEDS);
 
-        const { data: dev } = await supabase.from('user_devices').select('*').eq('profile_id', user.id);
-        setDevices(dev || []);
-
-        const { data: prof } = await supabase.from('profiles').select('reset_approval_status, verification_code').eq('id', user.id).maybeSingle();
-        if (prof?.reset_approval_status === 'PENDING' || prof?.reset_approval_status === 'APPROVED') {
-            setPendingResetCode(prof.verification_code);
-        } else {
-            setPendingResetCode(null);
-        }
+        // Security Data Load
+        await refreshSecurityData();
 
     } catch (e) {
         setArticles(MOCK_ARTICLES);
@@ -72,12 +68,38 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const refreshSecurityData = async () => {
+    if (!user) return;
+    const { data: dev } = await supabase.from('user_devices').select('*').eq('profile_id', user.id);
+    setDevices(dev || []);
+
+    const { data: prof } = await supabase.from('profiles').select('reset_approval_status, verification_code').eq('id', user.id).maybeSingle();
+    
+    if (prof) {
+        setResetStatus(prof.reset_approval_status as any);
+        // Only show code if it exists
+        if (prof.verification_code) {
+            setPendingResetCode(prof.verification_code);
+        } else {
+            setPendingResetCode(null);
+        }
+    }
+  };
+
   useEffect(() => { loadData(); }, [user]);
+
+  // Poll for updates if on Devices tab
+  useEffect(() => {
+    if (activeTab === 'DEVICES') {
+        const interval = setInterval(refreshSecurityData, 3000);
+        return () => clearInterval(interval);
+    }
+  }, [activeTab]);
 
   const handleApproveReset = async () => {
       if (!user) return;
       await approveResetRequest(user.id);
-      loadData();
+      await refreshSecurityData();
   };
 
   if (!user) return <div className="p-20 text-center font-black text-gray-400 uppercase tracking-widest">Access Denied</div>;
@@ -166,25 +188,38 @@ export const Dashboard: React.FC = () => {
 
             {activeTab === 'DEVICES' && (
                 <div className="space-y-8">
-                {pendingResetCode && isCurrentlyPrimary && (
+                {/* Reset Approval Section */}
+                {(resetStatus === 'PENDING' || resetStatus === 'APPROVED') && isCurrentlyPrimary && pendingResetCode && (
                     <div className="bg-orange-50 border-2 border-orange-200 p-8 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl animate-in zoom-in-95">
                         <div className="flex items-center gap-5">
                             <div className="bg-orange-100 p-4 rounded-3xl text-orange-600"><Key size={32} /></div>
                             <div>
-                                <h4 className="font-black text-gray-900 uppercase text-xs tracking-[0.2em]">Identity Verification Request</h4>
-                                <p className="text-gray-500 text-sm mt-1">A recovery code has been requested. Approve it to release the code.</p>
+                                <h4 className="font-black text-gray-900 uppercase text-xs tracking-[0.2em]">Password Reset Request</h4>
+                                <p className="text-gray-500 text-sm mt-1">
+                                    {resetStatus === 'PENDING' ? 'A secondary device requested a reset. Approve to see the code.' : 'Request Approved. Provide this code to the user:'}
+                                </p>
                             </div>
                         </div>
                         <div className="flex items-center gap-3 w-full md:w-auto">
-                            <div className="flex-1 md:flex-none bg-white border-2 border-orange-100 px-6 py-3 rounded-2xl font-black text-2xl tracking-[0.3em] text-orange-600 text-center">
-                                {pendingResetCode}
-                            </div>
-                            <button onClick={handleApproveReset} className="bg-orange-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-orange-700 transition-all">APPROVE CODE</button>
+                            {resetStatus === 'APPROVED' ? (
+                                <div className="flex-1 md:flex-none bg-white border-2 border-orange-100 px-8 py-4 rounded-2xl font-black text-2xl tracking-[0.3em] text-orange-600 text-center shadow-sm">
+                                    {pendingResetCode}
+                                </div>
+                            ) : (
+                                <button onClick={handleApproveReset} className="bg-orange-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-orange-700 transition-all flex items-center gap-2">
+                                    <CheckCircle size={16} /> APPROVE REQUEST
+                                </button>
+                            )}
                         </div>
                     </div>
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div className="col-span-full flex justify-end">
+                         <button onClick={refreshSecurityData} className="text-[10px] font-black text-gray-400 flex items-center gap-1 hover:text-indigo-600 uppercase tracking-widest">
+                            <RefreshCw size={12} /> Refresh Status
+                         </button>
+                    </div>
                     {devices.map(device => {
                         const isThisDevice = device.device_id === getDeviceId();
                         return (

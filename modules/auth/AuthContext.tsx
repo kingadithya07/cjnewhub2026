@@ -9,7 +9,7 @@ interface AuthContextType extends AuthState {
   logout: () => void;
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
   verifyAccount: (email: string, code: string) => Promise<{success: boolean, error?: string}>;
-  requestResetCode: (email: string) => Promise<{success: boolean, error?: string, requiresPrimaryApproval?: boolean}>;
+  requestResetCode: (email: string) => Promise<{success: boolean, error?: string, requiresPrimaryApproval?: boolean, devCode?: string}>;
   checkResetStatus: (email: string) => Promise<{approved: boolean, error?: string}>;
   resetPasswordWithCode: (email: string, code: string, newPassword: string) => Promise<{success: boolean, error?: string}>;
   refreshDeviceStatus: () => Promise<void>;
@@ -111,6 +111,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       verification_code: code, code_expiry: expiry
     });
     if (error) return { success: false, error: error.message };
+    
+    // DEV ONLY: Alert code for testing
+    alert(`DEV MODE REGISTRATION CODE: ${code}`);
     return { success: true };
   };
 
@@ -145,10 +148,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (error) {
         console.error("Supabase Reset Update Error:", error);
-        return { success: false, error: "Security layer error. Contact Admin." };
+        return { success: false, error: "Database update failed. Check Permissions." };
     }
 
-    return { success: true, requiresPrimaryApproval: !isPrimary };
+    // If Primary, return code immediately for UI display (Simulates email)
+    if (isPrimary) {
+        console.log("Primary Device Reset - Auto Approving");
+        return { success: true, requiresPrimaryApproval: false, devCode: code };
+    }
+
+    return { success: true, requiresPrimaryApproval: true };
   };
 
   const checkResetStatus = async (email: string) => {

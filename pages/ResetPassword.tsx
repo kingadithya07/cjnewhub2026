@@ -32,6 +32,11 @@ export const ResetPassword: React.FC = () => {
     setLoading(false);
     
     if (res.success) {
+      if (res.devCode) {
+         // Show code immediately if Primary Device (Simulating Email)
+         alert(`SIMULATED EMAIL\n\nReset Code: ${res.devCode}\n\n(In production, this goes to your email)`);
+      }
+
       if (res.requiresPrimaryApproval) {
         setStep('PENDING_APPROVAL');
       } else {
