@@ -113,8 +113,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // 2. Check if THIS device is already registered
     const existingRecord = safeDevices.find(d => d.device_id === currentId);
     
-    // 3. Check if ANY OTHER device is already Primary
-    const otherPrimaryExists = safeDevices.some(d => d.is_primary && d.device_id !== currentId);
+    // 3. Check if ANY device (including this one if it's already primary) is currently Primary
+    const hasExistingPrimary = safeDevices.some(d => d.is_primary);
 
     let isPrimary = false;
     let status: 'APPROVED' | 'PENDING' | 'REVOKED' = 'PENDING';
@@ -125,19 +125,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isPrimary = existingRecord.is_primary;
         status = existingRecord.status;
         
-        // Self-Healing: If I am the ONLY device, force Primary/Approved
+        // Self-Healing: If I am the ONLY device in the database, I must be Primary/Approved
         if (safeDevices.length === 1) {
             isPrimary = true;
             status = 'APPROVED';
         }
     } else {
-        // SCENARIO B: Brand New Device (or after DB clear)
+        // SCENARIO B: Brand New Device (or first login after database clear)
         if (safeDevices.length === 0) {
-            // I am the FIRST device. I am Primary.
+            // I am the FIRST device ever. I am Primary.
             isPrimary = true;
             status = 'APPROVED';
-        } else if (!otherPrimaryExists) {
-            // Devices exist but NO primary? (Rare/Error state). Claim Primary.
+        } else if (!hasExistingPrimary) {
+            // Devices exist but NO primary? (Shouldn't happen, but just in case). Claim Primary.
             isPrimary = true;
             status = 'APPROVED';
         } else {
@@ -179,13 +179,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const register = async (name: string, email: string, password: string, role: UserRole) => {
+    // 1. Check if user already exists to prevent "duplicate key" database error
+    const { data: existingUser } = await supabase.from('profiles').select('id').eq('email', email).maybeSingle();
+    
+    if (existingUser) {
+        return { success: false, error: "Account already exists with this email. Please Login." };
+    }
+
     const code = generateCode();
     const expiry = new Date(Date.now() + 15 * 60000).toISOString();
+    
     const { error } = await supabase.from('profiles').insert({
       id: crypto.randomUUID(),
       name, email, password_plain: password, role, is_verified: false,
       verification_code: code, code_expiry: expiry
     });
+    
     if (error) return { success: false, error: error.message };
     
     // DEV ONLY: Alert code for testing
