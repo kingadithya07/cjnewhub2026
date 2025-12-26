@@ -7,7 +7,7 @@ import {
   Plus, Edit3, Trash2, CheckCircle, Clock, XCircle, 
   FileText, Scissors, Layout, Save, X, Star, Settings, MessageCircle, 
   Shield, Smartphone, AlertTriangle, User as UserIcon, Database, Check, 
-  Newspaper, Store, Calendar, Image as ImageIcon, Monitor, Lock, ArrowRight, Loader2, Key, Copy, RefreshCw
+  Newspaper, Store, Calendar, Image as ImageIcon, Monitor, Lock, ArrowRight, Loader2, Key, Copy, RefreshCw, Radio
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { MOCK_ARTICLES, MOCK_EPAPER, MOCK_CLASSIFIEDS } from '../services/mockData';
@@ -77,7 +77,7 @@ export const Dashboard: React.FC = () => {
     
     if (prof) {
         setResetStatus(prof.reset_approval_status as any);
-        // Only show code if it exists
+        // Only set code if it exists, otherwise keep it null but DONT hide the UI
         if (prof.verification_code) {
             setPendingResetCode(prof.verification_code);
         } else {
@@ -98,7 +98,7 @@ export const Dashboard: React.FC = () => {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
         () => {
-            console.log('Profile update detected');
+            console.log('Profile update detected - Refreshing Security');
             refreshSecurityData();
         }
       )
@@ -110,7 +110,7 @@ export const Dashboard: React.FC = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'user_devices', filter: `profile_id=eq.${user.id}` },
         () => {
-            console.log('Device update detected');
+            console.log('Device update detected - Refreshing Security');
             refreshSecurityData();
         }
       )
@@ -126,6 +126,8 @@ export const Dashboard: React.FC = () => {
       if (!user) return;
       await approveResetRequest(user.id);
       // Realtime listener will catch the update and refresh UI
+      // Force refresh manually just in case
+      setTimeout(refreshSecurityData, 500);
   };
 
   if (!user) return <div className="p-20 text-center font-black text-gray-400 uppercase tracking-widest">Access Denied</div>;
@@ -214,38 +216,52 @@ export const Dashboard: React.FC = () => {
 
             {activeTab === 'DEVICES' && (
                 <div className="space-y-8">
-                {/* Reset Approval Section */}
-                {(resetStatus === 'PENDING' || resetStatus === 'APPROVED') && isCurrentlyPrimary && pendingResetCode && (
+                
+                {/* PRIMARY DEVICE INDICATOR */}
+                <div className={`p-4 rounded-xl text-xs font-black uppercase tracking-widest flex justify-between items-center ${isCurrentlyPrimary ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                    <span className="flex items-center gap-2">
+                        {isCurrentlyPrimary ? <CheckCircle size={16} className="text-[#b4a070]" /> : <XCircle size={16} />}
+                        {isCurrentlyPrimary ? 'THIS IS THE PRIMARY HUB' : 'THIS IS A SECONDARY VIEWER'}
+                    </span>
+                    <button onClick={refreshSecurityData} className="flex items-center gap-1 hover:text-[#b4a070]"><RefreshCw size={12} /> Sync Requests</button>
+                </div>
+
+                {/* Reset Approval Section - Logic Relaxed to Show Even if Code is Hidden */}
+                {(resetStatus === 'PENDING' || resetStatus === 'APPROVED') && (
                     <div className="bg-orange-50 border-2 border-orange-200 p-8 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl animate-in zoom-in-95">
                         <div className="flex items-center gap-5">
                             <div className="bg-orange-100 p-4 rounded-3xl text-orange-600"><Key size={32} /></div>
                             <div>
                                 <h4 className="font-black text-gray-900 uppercase text-xs tracking-[0.2em]">Password Reset Request</h4>
                                 <p className="text-gray-500 text-sm mt-1">
-                                    {resetStatus === 'PENDING' ? 'A secondary device requested a reset. Approve to see the code.' : 'Request Approved. Provide this code to the user:'}
+                                    {resetStatus === 'PENDING' ? 'A secondary device requested a reset. Approve to see the code.' : 'Request Approved. The code is visible below.'}
                                 </p>
+                                {!isCurrentlyPrimary && (
+                                    <p className="text-[10px] text-red-500 font-bold mt-2 uppercase tracking-wide">Action Required on Primary Device</p>
+                                )}
                             </div>
                         </div>
                         <div className="flex items-center gap-3 w-full md:w-auto">
                             {resetStatus === 'APPROVED' ? (
-                                <div className="flex-1 md:flex-none bg-white border-2 border-orange-100 px-8 py-4 rounded-2xl font-black text-2xl tracking-[0.3em] text-orange-600 text-center shadow-sm">
-                                    {pendingResetCode}
+                                <div className="flex-1 md:flex-none bg-white border-2 border-orange-100 px-8 py-4 rounded-2xl font-black text-2xl tracking-[0.3em] text-orange-600 text-center shadow-sm min-w-[150px]">
+                                    {pendingResetCode || '******'}
                                 </div>
                             ) : (
-                                <button onClick={handleApproveReset} className="bg-orange-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-orange-700 transition-all flex items-center gap-2">
-                                    <CheckCircle size={16} /> APPROVE REQUEST
-                                </button>
+                                isCurrentlyPrimary ? (
+                                    <button onClick={handleApproveReset} className="bg-orange-600 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-orange-700 transition-all flex items-center gap-2">
+                                        <CheckCircle size={16} /> APPROVE REQUEST
+                                    </button>
+                                ) : (
+                                    <div className="bg-gray-200 text-gray-400 px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest">
+                                        Wait for Primary
+                                    </div>
+                                )
                             )}
                         </div>
                     </div>
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div className="col-span-full flex justify-end">
-                         <button onClick={refreshSecurityData} className="text-[10px] font-black text-gray-400 flex items-center gap-1 hover:text-indigo-600 uppercase tracking-widest">
-                            <RefreshCw size={12} /> Status: Live
-                         </button>
-                    </div>
                     {devices.map(device => {
                         const isThisDevice = device.device_id === getDeviceId();
                         return (
