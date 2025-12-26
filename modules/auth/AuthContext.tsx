@@ -107,22 +107,58 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       .select('*')
       .eq('profile_id', profileId);
 
-    const isFirstDevice = !devices || devices.length === 0;
+    const safeDevices = devices || [];
+    const existingRecord = safeDevices.find(d => d.device_id === currentId);
+    
+    // Check if ANY device (other than this one) is currently primary
+    const hasOtherPrimary = safeDevices.some(d => d.is_primary && d.device_id !== currentId);
 
+    let isPrimary = false;
+    let status: 'APPROVED' | 'PENDING' | 'REVOKED' = 'PENDING';
+
+    if (existingRecord) {
+        // CASE 1: Device already exists. 
+        // We MUST preserve its existing status to prevent overwrites during re-login.
+        isPrimary = existingRecord.is_primary;
+        status = existingRecord.status;
+        
+        // Safety check: If for some reason this is the ONLY device in DB, force it to be primary/approved
+        if (safeDevices.length === 1) {
+            isPrimary = true;
+            status = 'APPROVED';
+        }
+    } else {
+        // CASE 2: New Device (or cleared local storage)
+        if (safeDevices.length === 0) {
+            // First ever device -> Primary
+            isPrimary = true;
+            status = 'APPROVED';
+        } else if (!hasOtherPrimary) {
+            // Devices exist, but NONE are primary (orphaned state) -> Claim Primary
+            isPrimary = true;
+            status = 'APPROVED';
+        } else {
+            // A primary exists elsewhere -> This is Secondary
+            isPrimary = false;
+            status = 'PENDING';
+        }
+    }
+
+    // Upsert with the calculated state
     await supabase.from('user_devices').upsert({
       profile_id: profileId,
       device_id: currentId,
       device_name: currentName,
-      is_primary: isFirstDevice,
-      status: isFirstDevice ? 'APPROVED' : 'PENDING',
+      is_primary: isPrimary,
+      status: status,
       last_used_at: new Date().toISOString()
     });
 
-    if (isFirstDevice) {
+    if (isPrimary) {
       await supabase.from('profiles').update({ primary_device_id: currentId }).eq('id', profileId);
     }
 
-    return isFirstDevice || devices?.find(d => d.device_id === currentId)?.status === 'APPROVED';
+    return status === 'APPROVED';
   };
 
   const login = async (email: string, password?: string) => {
