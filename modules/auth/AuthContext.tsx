@@ -102,43 +102,46 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const currentId = getDeviceId();
     const currentName = getDeviceName();
 
+    // 1. Fetch ALL devices for this user
     const { data: devices } = await supabase
       .from('user_devices')
       .select('*')
       .eq('profile_id', profileId);
 
     const safeDevices = devices || [];
+    
+    // 2. Check if THIS device is already registered
     const existingRecord = safeDevices.find(d => d.device_id === currentId);
     
-    // Check if ANY device (other than this one) is currently primary
-    const hasOtherPrimary = safeDevices.some(d => d.is_primary && d.device_id !== currentId);
+    // 3. Check if ANY OTHER device is already Primary
+    const otherPrimaryExists = safeDevices.some(d => d.is_primary && d.device_id !== currentId);
 
     let isPrimary = false;
     let status: 'APPROVED' | 'PENDING' | 'REVOKED' = 'PENDING';
 
     if (existingRecord) {
-        // CASE 1: Device already exists. 
-        // We MUST preserve its existing status to prevent overwrites during re-login.
+        // SCENARIO A: Re-Login of an existing device.
+        // CRITICAL: Preserve existing status. Do not downgrade.
         isPrimary = existingRecord.is_primary;
         status = existingRecord.status;
         
-        // Safety check: If for some reason this is the ONLY device in DB, force it to be primary/approved
+        // Self-Healing: If I am the ONLY device, force Primary/Approved
         if (safeDevices.length === 1) {
             isPrimary = true;
             status = 'APPROVED';
         }
     } else {
-        // CASE 2: New Device (or cleared local storage)
+        // SCENARIO B: Brand New Device (or after DB clear)
         if (safeDevices.length === 0) {
-            // First ever device -> Primary
+            // I am the FIRST device. I am Primary.
             isPrimary = true;
             status = 'APPROVED';
-        } else if (!hasOtherPrimary) {
-            // Devices exist, but NONE are primary (orphaned state) -> Claim Primary
+        } else if (!otherPrimaryExists) {
+            // Devices exist but NO primary? (Rare/Error state). Claim Primary.
             isPrimary = true;
             status = 'APPROVED';
         } else {
-            // A primary exists elsewhere -> This is Secondary
+            // A Primary exists elsewhere. I am Secondary. Wait for approval.
             isPrimary = false;
             status = 'PENDING';
         }
@@ -264,6 +267,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       .eq('profile_id', auth.user.id)
       .eq('device_id', targetDeviceId);
     
+    // If we just approved OURSELVES (rare but possible via another screen), update state
     if (targetDeviceId === getDeviceId()) {
       setAuth(prev => ({ ...prev, isDeviceApproved: true }));
     }
