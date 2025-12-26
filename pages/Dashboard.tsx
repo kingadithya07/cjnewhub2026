@@ -7,7 +7,7 @@ import {
   Plus, Edit3, Trash2, CheckCircle, Clock, XCircle, 
   FileText, Scissors, Layout, Save, X, Star, Settings, MessageCircle, 
   Shield, Smartphone, AlertTriangle, User as UserIcon, Database, Check, 
-  Newspaper, Store, Calendar, Image as ImageIcon, Monitor, Lock, ArrowRight, Loader2
+  Newspaper, Store, Calendar, Image as ImageIcon, Monitor, Lock, ArrowRight, Loader2, Key
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { MOCK_ARTICLES, MOCK_EPAPER, MOCK_CLASSIFIEDS } from '../services/mockData';
@@ -24,6 +24,7 @@ export const Dashboard: React.FC = () => {
   const [epaperPages, setEpaperPages] = useState<EPaperPage[]>([]);
   const [classifieds, setClassifieds] = useState<Classified[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [pendingReset, setPendingReset] = useState(false);
 
   // Create Mode States
   const [showCreateModal, setShowCreateModal] = useState<'NONE' | 'ARTICLE' | 'EPAPER' | 'CLASSIFIED'>('NONE');
@@ -31,31 +32,28 @@ export const Dashboard: React.FC = () => {
   const [newClassified, setNewClassified] = useState({ title: '', content: '', price: '', location: '', category: 'General' });
 
   const loadData = async () => {
+    if (!user) return;
     setLoading(true);
     try {
+        // Articles
         const { data: art } = await supabase.from('articles').select('*').order('created_at', { ascending: false });
-        if(art && art.length > 0) {
-            setArticles(art.map(a => ({...a, createdAt: a.created_at, authorName: a.author_name, authorAvatar: a.author_avatar, thumbnailUrl: a.thumbnail_url, isFeatured: a.is_featured})));
-        } else {
-            setArticles(MOCK_ARTICLES);
-        }
+        setArticles(art && art.length > 0 ? art.map(a => ({...a, createdAt: a.created_at, authorName: a.author_name, authorAvatar: a.author_avatar, thumbnailUrl: a.thumbnail_url, isFeatured: a.is_featured})) : MOCK_ARTICLES);
 
+        // EPaper
         const { data: ep } = await supabase.from('epaper_pages').select('*').order('date', { ascending: false }).order('page_number', { ascending: true });
-        if(ep && ep.length > 0) {
-            setEpaperPages(ep.map(p => ({...p, pageNumber: p.page_number, imageUrl: p.image_url})));
-        } else {
-            setEpaperPages(MOCK_EPAPER);
-        }
+        setEpaperPages(ep && ep.length > 0 ? ep.map(p => ({...p, pageNumber: p.page_number, imageUrl: p.image_url})) : MOCK_EPAPER);
 
+        // Classifieds
         const { data: cls } = await supabase.from('classifieds').select('*').order('created_at', { ascending: false });
-        if(cls && cls.length > 0) {
-            setClassifieds(cls.map(c => ({...c, createdAt: c.created_at})));
-        } else {
-            setClassifieds(MOCK_CLASSIFIEDS);
-        }
+        setClassifieds(cls && cls.length > 0 ? cls.map(c => ({...c, createdAt: c.created_at})) : MOCK_CLASSIFIEDS);
 
-        const { data: dev } = await supabase.from('user_devices').select('*').eq('profile_id', user?.id);
+        // Devices & Profile Status
+        const { data: dev } = await supabase.from('user_devices').select('*').eq('profile_id', user.id);
         if(dev) setDevices(dev);
+
+        const { data: prof } = await supabase.from('profiles').select('reset_approval_status').eq('id', user.id).maybeSingle();
+        setPendingReset(prof?.reset_approval_status === 'PENDING');
+
     } catch (e) {
         console.error("Dashboard Load Error", e);
         setArticles(MOCK_ARTICLES);
@@ -89,31 +87,11 @@ export const Dashboard: React.FC = () => {
 
   if (!user) return <div className="p-20 text-center font-black text-gray-400 uppercase tracking-widest">Access Denied</div>;
 
-  if (!isDeviceApproved && activeTab !== 'DEVICES') {
-    return (
-        <div className="flex flex-col items-center justify-center p-20 text-center bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">
-            <div className="bg-orange-100 p-6 rounded-full text-orange-600 mb-6">
-                <Lock size={64} />
-            </div>
-            <h2 className="text-3xl font-black text-gray-900 mb-2 uppercase tracking-tight">Device Approval Required</h2>
-            <p className="text-gray-500 max-w-md mx-auto mb-8">
-                This device is not yet authorized. Please use your <strong>Primary Device</strong> to approve this connection in the Devices tab.
-            </p>
-            <button 
-                onClick={() => setSearchParams({ tab: 'DEVICES' })}
-                className="bg-[#111827] text-white px-8 py-4 rounded-2xl font-black uppercase text-sm tracking-widest shadow-xl hover:bg-black transition-all flex items-center gap-2"
-            >
-                Go to Devices <ArrowRight size={20} />
-            </button>
-        </div>
-    );
-  }
-
   const tabs = [
     { id: 'ARTICLES', label: 'ARTICLES', icon: <FileText size={16}/> },
     { id: 'EPAPER', label: 'E-PAPER', icon: <Newspaper size={16}/> },
     { id: 'CLASSIFIEDS', label: 'CLASSIFIEDS', icon: <Store size={16}/> },
-    { id: 'DEVICES', label: 'DEVICES', icon: <Smartphone size={16}/> },
+    { id: 'DEVICES', label: 'SECURITY', icon: <Shield size={16}/> },
     { id: 'COMMUNICATION', label: 'CHATS', icon: <MessageCircle size={16}/> },
   ];
 
@@ -160,7 +138,7 @@ export const Dashboard: React.FC = () => {
       {loading ? (
           <div className="py-24 flex flex-col items-center justify-center gap-4">
               <Loader2 className="animate-spin text-indigo-600" size={48} />
-              <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Synchronizing Archives...</p>
+              <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Accessing Archives...</p>
           </div>
       ) : (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
@@ -171,7 +149,6 @@ export const Dashboard: React.FC = () => {
                         <tr>
                             <th className="px-6 py-5">Publication</th>
                             <th className="px-6 py-5">Author</th>
-                            <th className="px-6 py-5">Category</th>
                             <th className="px-6 py-5">Status</th>
                             <th className="px-6 py-5 text-right">Actions</th>
                         </tr>
@@ -188,9 +165,6 @@ export const Dashboard: React.FC = () => {
                                     </div>
                                 </td>
                                 <td className="px-6 py-5 text-gray-600 font-medium">{art.authorName}</td>
-                                <td className="px-6 py-5">
-                                    <span className="bg-gray-100 text-gray-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider">{art.category}</span>
-                                </td>
                                 <td className="px-6 py-5">
                                     <span className={`flex items-center gap-1.5 font-black text-[9px] tracking-widest uppercase ${art.status === 'PUBLISHED' ? 'text-green-600' : 'text-orange-500'}`}>
                                         {art.status === 'PUBLISHED' ? <CheckCircle size={12}/> : <Clock size={12}/>} {art.status}
@@ -210,13 +184,9 @@ export const Dashboard: React.FC = () => {
             {activeTab === 'EPAPER' && (
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
                 {epaperPages.map(page => (
-                    <div key={page.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm group hover:shadow-xl transition-all ring-1 ring-transparent hover:ring-indigo-100">
+                    <div key={page.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm group hover:shadow-xl transition-all">
                         <div className="relative aspect-[3/4]">
                             <img src={page.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-4">
-                                <button className="bg-white p-3 rounded-xl text-gray-900 hover:bg-[#b4a070] hover:text-white transition-all shadow-lg"><Scissors size={20}/></button>
-                                <button className="bg-white p-3 rounded-xl text-gray-900 hover:bg-indigo-600 hover:text-white transition-all shadow-lg"><Edit3 size={20}/></button>
-                            </div>
                         </div>
                         <div className="p-4 border-t border-gray-50 bg-white flex justify-between items-center">
                             <div>
@@ -235,9 +205,8 @@ export const Dashboard: React.FC = () => {
                     <table className="w-full text-left text-sm">
                         <thead className="bg-gray-50 border-b border-gray-100 text-gray-400 font-black uppercase text-[9px] tracking-[0.2em]">
                         <tr>
-                            <th className="px-6 py-5">Listing Title</th>
+                            <th className="px-6 py-5">Listing</th>
                             <th className="px-6 py-5">Category</th>
-                            <th className="px-6 py-5">Location</th>
                             <th className="px-6 py-5">Valuation</th>
                             <th className="px-6 py-5 text-right">Actions</th>
                         </tr>
@@ -247,7 +216,6 @@ export const Dashboard: React.FC = () => {
                             <tr key={cl.id} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-6 py-5 font-bold text-gray-900">{cl.title}</td>
                                 <td className="px-6 py-5 text-gray-500 font-medium">{cl.category}</td>
-                                <td className="px-6 py-5 text-gray-500">{cl.location}</td>
                                 <td className="px-6 py-5 font-black text-emerald-600">{cl.price}</td>
                                 <td className="px-6 py-5 text-right space-x-2">
                                     <button className="p-2 text-gray-400 hover:text-indigo-600 rounded-lg"><Edit3 size={18}/></button>
@@ -262,11 +230,24 @@ export const Dashboard: React.FC = () => {
 
             {activeTab === 'DEVICES' && (
                 <div className="space-y-8">
+                {/* Security Action Alerts */}
+                {pendingReset && isCurrentlyPrimary && (
+                    <div className="bg-orange-50 border-2 border-orange-200 p-6 rounded-3xl flex items-center justify-between gap-4 animate-bounce">
+                        <div className="flex items-center gap-4">
+                            <div className="bg-orange-200 p-3 rounded-2xl text-orange-700"><Key size={24} /></div>
+                            <div>
+                                <h4 className="font-black text-gray-900 uppercase text-xs tracking-widest">Pending Password Reset</h4>
+                                <p className="text-gray-500 text-sm">A reset request was initiated from a secondary device. Approve it to proceed.</p>
+                            </div>
+                        </div>
+                        <button onClick={() => approveDevice('AUTO_RESET')} className="bg-[#111827] text-white px-6 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg">APPROVE REQUEST</button>
+                    </div>
+                )}
+
                 <div className="bg-indigo-900 text-white p-8 rounded-3xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-20 -mt-20 blur-3xl"></div>
                     <div className="relative z-10">
-                        <h3 className="text-2xl font-black flex items-center gap-3 uppercase tracking-tight"><Shield size={28} className="text-[#b4a070]"/> Security Control Hub</h3>
-                        <p className="text-indigo-200 text-sm mt-2 font-medium">Authorizing primary devices secures your account against unauthorized logins.</p>
+                        <h3 className="text-2xl font-black flex items-center gap-3 uppercase tracking-tight"><Shield size={28} className="text-[#b4a070]"/> Security Hub</h3>
+                        <p className="text-indigo-200 text-sm mt-2 font-medium">Control device access and sensitive security actions from your primary station.</p>
                     </div>
                     {isCurrentlyPrimary && (
                         <div className="relative z-10 bg-[#b4a070] text-black px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg">PRIMARY AUTHORITY</div>
@@ -285,7 +266,6 @@ export const Dashboard: React.FC = () => {
                                     {device.is_primary && <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-xl uppercase tracking-widest border border-indigo-100">PRIMARY</span>}
                                 </div>
                                 <h4 className="font-bold text-gray-900 text-lg leading-tight">{device.device_name}</h4>
-                                <p className="text-[9px] text-gray-400 font-mono mt-2 truncate bg-gray-100/50 p-2 rounded-lg">{device.device_id}</p>
                                 
                                 <div className="mt-8 flex items-center justify-between border-t border-gray-100 pt-6">
                                     <span className={`text-[10px] font-black uppercase px-3 py-1.5 rounded-full tracking-widest ${device.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-orange-100 text-orange-700 border border-orange-200'}`}>
@@ -297,14 +277,6 @@ export const Dashboard: React.FC = () => {
                                             className="text-xs font-black text-indigo-600 hover:text-indigo-800 transition-colors uppercase tracking-widest"
                                         >
                                             Approve Access
-                                        </button>
-                                    )}
-                                    {device.status === 'APPROVED' && !device.is_primary && isCurrentlyPrimary && (
-                                        <button 
-                                            onClick={() => { revokeDevice(device.device_id); loadData(); }}
-                                            className="text-xs font-black text-red-600 hover:text-red-800 transition-colors uppercase tracking-widest"
-                                        >
-                                            Revoke
                                         </button>
                                     )}
                                 </div>
@@ -341,41 +313,9 @@ export const Dashboard: React.FC = () => {
                  </div>
                  <div>
                     <label className="block text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-2 ml-1">Cloud Storage URL</label>
-                    <div className="relative">
-                        <ImageIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                        <input type="url" value={newEpaper.imageUrl} onChange={e => setNewEpaper({...newEpaper, imageUrl: e.target.value})} placeholder="https://cdn.example.com/page.jpg" className="w-full pl-12 pr-4 py-4 border-2 border-gray-50 rounded-2xl outline-none focus:border-[#b4a070] bg-gray-50/50" />
-                    </div>
+                    <input type="url" value={newEpaper.imageUrl} onChange={e => setNewEpaper({...newEpaper, imageUrl: e.target.value})} placeholder="https://cdn.example.com/page.jpg" className="w-full px-4 py-4 border-2 border-gray-50 rounded-2xl outline-none focus:border-[#b4a070] bg-gray-50/50" />
                  </div>
                  <button type="submit" className="w-full bg-[#111827] text-white font-black py-5 rounded-[1.5rem] shadow-xl hover:bg-black transition-all uppercase tracking-widest text-sm mt-4">Execute Upload</button>
-              </form>
-           </div>
-        </div>
-      )}
-
-      {showCreateModal === 'CLASSIFIED' && (
-        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-           <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-              <div className="bg-[#111827] p-8 text-white flex justify-between items-center border-b-4 border-emerald-500">
-                 <div>
-                    <h3 className="font-black text-xl uppercase tracking-tight">Post Classified</h3>
-                    <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mt-1">Direct Market Access</p>
-                 </div>
-                 <button onClick={() => setShowCreateModal('NONE')} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={24}/></button>
-              </div>
-              <form onSubmit={handleAddClassified} className="p-10 space-y-5">
-                 <input placeholder="Listing Headline" required value={newClassified.title} onChange={e => setNewClassified({...newClassified, title: e.target.value})} className="w-full border-2 border-gray-50 p-4 rounded-2xl outline-none focus:border-emerald-500 bg-gray-50/50 font-bold" />
-                 <textarea placeholder="Detailed Description..." required value={newClassified.content} onChange={e => setNewClassified({...newClassified, content: e.target.value})} className="w-full border-2 border-gray-50 p-4 rounded-2xl outline-none focus:border-emerald-500 bg-gray-50/50 h-32 resize-none text-sm" />
-                 <div className="grid grid-cols-2 gap-4">
-                    <div className="relative">
-                        <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500" size={16} />
-                        <input placeholder="Price" required value={newClassified.price} onChange={e => setNewClassified({...newClassified, price: e.target.value})} className="w-full pl-10 pr-4 py-4 border-2 border-gray-50 rounded-2xl outline-none focus:border-emerald-500 bg-gray-50/50 font-bold" />
-                    </div>
-                    <div className="relative">
-                        <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                        <input placeholder="Location" required value={newClassified.location} onChange={e => setNewClassified({...newClassified, location: e.target.value})} className="w-full pl-10 pr-4 py-4 border-2 border-gray-50 rounded-2xl outline-none focus:border-emerald-500 bg-gray-50/50" />
-                    </div>
-                 </div>
-                 <button type="submit" className="w-full bg-emerald-600 text-white font-black py-5 rounded-[1.5rem] shadow-xl hover:bg-emerald-700 transition-all uppercase tracking-widest text-sm mt-4">Publish Advertisement</button>
               </form>
            </div>
         </div>
@@ -383,6 +323,3 @@ export const Dashboard: React.FC = () => {
     </div>
   );
 };
-
-const DollarSign = ({ size, className }: { size: number, className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>;
-const MapPin = ({ size, className }: { size: number, className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>;

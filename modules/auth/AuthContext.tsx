@@ -9,7 +9,7 @@ interface AuthContextType extends AuthState {
   logout: () => void;
   register: (name: string, email: string, password: string, role: UserRole) => Promise<{success: boolean, error?: string}>;
   verifyAccount: (email: string, code: string) => Promise<{success: boolean, error?: string}>;
-  requestResetCode: (email: string) => Promise<{success: boolean, error?: string}>;
+  requestResetCode: (email: string) => Promise<{success: boolean, error?: string, requiresPrimaryApproval?: boolean}>;
   resetPasswordWithCode: (email: string, code: string, newPassword: string) => Promise<{success: boolean, error?: string}>;
   refreshDeviceStatus: () => Promise<void>;
   approveDevice: (deviceId: string) => Promise<void>;
@@ -56,7 +56,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
   const showInternalCode = (type: string, email: string, code: string) => {
-    alert(`INTERNAL SECURITY SYSTEM\n\nAction: ${type}\nTarget: ${email}\n\nYour 6-digit code is: ${code}`);
+    alert(`SECURITY ALERT: ${type}\nTarget: ${email}\n\nCode: ${code}\n\n(This code is also logged in the Security Hub)`);
   };
 
   const registerDevice = async (profileId: string) => {
@@ -130,6 +130,48 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: true };
   };
 
+  const requestResetCode = async (email: string) => {
+    const { data: profile } = await supabase.from('profiles').select('*').eq('email', email).maybeSingle();
+    if (!profile) return { success: false, error: "Account not found." };
+
+    const currentDeviceId = getDeviceId();
+    const isPrimary = profile.primary_device_id === currentDeviceId;
+    
+    const code = generateCode();
+    const expiry = new Date(Date.now() + 15 * 60000).toISOString();
+
+    // Logic: If not primary device, the request itself must be approved by the primary device
+    const { error } = await supabase.from('profiles').update({
+      verification_code: code,
+      code_expiry: expiry,
+      reset_approval_status: isPrimary ? 'APPROVED' : 'PENDING'
+    }).eq('email', email);
+
+    if (error) return { success: false, error: "System error." };
+
+    if (!isPrimary) {
+      return { success: true, requiresPrimaryApproval: true };
+    }
+
+    showInternalCode("PASSWORD RESET", email, code);
+    return { success: true };
+  };
+
+  const resetPasswordWithCode = async (email: string, code: string, newPassword: string) => {
+    const { data: profile } = await supabase.from('profiles').select('*').eq('email', email).eq('verification_code', code).maybeSingle();
+    
+    if (!profile) return { success: false, error: "Invalid or expired code." };
+    if (profile.reset_approval_status !== 'APPROVED') return { success: false, error: "Reset request pending primary device approval." };
+
+    const { error } = await supabase.from('profiles').update({
+      password_plain: newPassword,
+      verification_code: null,
+      reset_approval_status: null
+    }).eq('email', email);
+
+    return error ? { success: false, error: "Update failed." } : { success: true };
+  };
+
   const approveDevice = async (targetDeviceId: string) => {
     if (!auth.user) return;
     await supabase.from('user_devices')
@@ -137,7 +179,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       .eq('profile_id', auth.user.id)
       .eq('device_id', targetDeviceId);
     
-    // Refresh local state if current device was approved
+    // Also auto-approve any pending reset requests if the primary device is approving things
+    await supabase.from('profiles').update({ reset_approval_status: 'APPROVED' }).eq('id', auth.user.id);
+
     if (targetDeviceId === getDeviceId()) {
       setAuth(prev => ({ ...prev, isDeviceApproved: true }));
     }
@@ -167,8 +211,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     <AuthContext.Provider value={{ 
       ...auth, 
       login, logout, register, verifyAccount,
-      requestResetCode: async () => ({success:false}), 
-      resetPasswordWithCode: async () => ({success:false}),
+      requestResetCode, 
+      resetPasswordWithCode,
       refreshDeviceStatus,
       approveDevice,
       revokeDevice
