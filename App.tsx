@@ -18,7 +18,16 @@ import { Store, Newspaper, TrendingUp, MapPin, DollarSign, Loader2 } from 'lucid
 import { MOCK_ARTICLES, MOCK_EPAPER } from './services/mockData';
 
 const ProtectedRoute = ({ children, roles }: { children?: React.ReactNode, roles?: UserRole[] }) => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
+  
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+         <Loader2 className="animate-spin text-[#b4a070]" size={48} />
+      </div>
+    );
+  }
+
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (roles && user && !roles.includes(user.role)) return <Navigate to="/" replace />;
   return <>{children}</>;

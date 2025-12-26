@@ -24,7 +24,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [auth, setAuth] = useState<AuthState>({
     user: null,
     isAuthenticated: false,
-    isDeviceApproved: false
+    isDeviceApproved: false,
+    isLoading: true
   });
 
   const checkDeviceStatus = async (profileId: string) => {
@@ -39,7 +40,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       return deviceData?.status === 'APPROVED';
     } catch (e) {
-      return true; 
+      return true; // Fail open if error
     }
   };
 
@@ -81,11 +82,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (savedUser) {
         try {
           const user = JSON.parse(savedUser);
+          // Don't await checkDeviceStatus to block render, but do it quickly
           const approved = await checkDeviceStatus(user.id);
-          setAuth({ user, isAuthenticated: true, isDeviceApproved: approved });
+          setAuth({ user, isAuthenticated: true, isDeviceApproved: approved, isLoading: false });
         } catch (e) {
           localStorage.removeItem('newsflow_session');
+          setAuth(prev => ({ ...prev, isLoading: false }));
         }
+      } else {
+         setAuth(prev => ({ ...prev, isLoading: false }));
       }
     };
     init();
@@ -128,7 +133,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const isApproved = await registerDevice(data.id);
     const user: User = { id: data.id, name: data.name, email: data.email, role: data.role as UserRole, avatar: data.avatar };
     
-    setAuth({ user, isAuthenticated: true, isDeviceApproved: isApproved });
+    setAuth({ user, isAuthenticated: true, isDeviceApproved: isApproved, isLoading: false });
     localStorage.setItem('newsflow_session', JSON.stringify(user));
 
     return { success: true, requiresDeviceApproval: !isApproved };
@@ -157,7 +162,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await registerDevice(data.id); 
     
     const user: User = { id: data.id, name: data.name, email: data.email, role: data.role as UserRole, avatar: data.avatar };
-    setAuth({ user, isAuthenticated: true, isDeviceApproved: true });
+    setAuth({ user, isAuthenticated: true, isDeviceApproved: true, isLoading: false });
     localStorage.setItem('newsflow_session', JSON.stringify(user));
     return { success: true };
   };
@@ -238,7 +243,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = () => {
     localStorage.removeItem('newsflow_session');
-    setAuth({ user: null, isAuthenticated: false, isDeviceApproved: false });
+    setAuth({ user: null, isAuthenticated: false, isDeviceApproved: false, isLoading: false });
   };
 
   return (

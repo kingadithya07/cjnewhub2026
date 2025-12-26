@@ -223,7 +223,10 @@ export const Dashboard: React.FC = () => {
                         {isCurrentlyPrimary ? <CheckCircle size={16} className="text-[#b4a070]" /> : <XCircle size={16} />}
                         {isCurrentlyPrimary ? 'THIS IS THE PRIMARY HUB' : 'THIS IS A SECONDARY VIEWER'}
                     </span>
-                    <button onClick={refreshSecurityData} className="flex items-center gap-1 hover:text-[#b4a070]"><RefreshCw size={12} /> Sync Requests</button>
+                    <div className="flex items-center gap-4">
+                        <span className="opacity-50 text-[9px]">ID: {getDeviceId().substring(0, 8)}...</span>
+                        <button onClick={refreshSecurityData} className="flex items-center gap-1 hover:text-[#b4a070]"><RefreshCw size={12} /> Sync Requests</button>
+                    </div>
                 </div>
 
                 {/* Reset Approval Section - Logic Relaxed to Show Even if Code is Hidden */}

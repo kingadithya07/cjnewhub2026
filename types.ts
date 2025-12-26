@@ -62,6 +62,7 @@ export interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
   isDeviceApproved: boolean;
+  isLoading: boolean;
 }
 
 export interface WatermarkSettings {
