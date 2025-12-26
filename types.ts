@@ -14,6 +14,16 @@ export interface User {
   avatar?: string;
 }
 
+export interface Device {
+  id: string;
+  profile_id: string;
+  device_id: string;
+  device_name: string;
+  is_primary: boolean;
+  status: 'APPROVED' | 'PENDING' | 'REVOKED';
+  last_used_at: string;
+}
+
 export interface Article {
   id: string;
   title: string;
@@ -51,6 +61,7 @@ export interface EPaperPage {
 export interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
+  isDeviceApproved: boolean;
 }
 
 export interface WatermarkSettings {
@@ -60,7 +71,6 @@ export interface WatermarkSettings {
   showDate: boolean;
 }
 
-// Fixed missing exports for modules/services
 export interface Category {
   id: string;
   name: string;
