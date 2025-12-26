@@ -52,6 +52,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
+  const showInternalCode = (type: string, email: string, code: string) => {
+    // Styling the log for developers
+    console.log(`%c[INTERNAL SYSTEM: ${type}]%c Code for ${email}: %c${code}`, 
+      "background: #111827; color: #b4a070; padding: 4px; border-radius: 4px; font-weight: bold;",
+      "color: #374151;",
+      "color: #111827; font-weight: 900; font-size: 1.2em; text-decoration: underline;"
+    );
+    
+    // Alerting the user internally
+    alert(`INTERNAL SECURITY SYSTEM\n\nAction: ${type}\nTarget: ${email}\n\nYour 6-digit code is: ${code}\n(This code is generated internally by the Hub and expires in 15 minutes)`);
+  };
+
   const register = async (name: string, email: string, password: string, role: UserRole) => {
     const code = generateCode();
     const expiry = new Date(Date.now() + 15 * 60000).toISOString();
@@ -74,10 +86,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (insertError) throw insertError;
 
-      // Simulation
-      console.log(`[VERIFICATION] Code for ${email}: ${code}`);
-      alert(`SYSTEM: Your verification code is ${code}`);
-      
+      showInternalCode("REGISTRATION", email, code);
       return { success: true };
     } catch (e: any) {
       return { success: false, error: e.message || "Registration failed." };
@@ -96,7 +105,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (error || !data) return { success: false, error: "Invalid code." };
       
       const expiry = new Date(data.code_expiry);
-      if (expiry < new Date()) return { success: false, error: "Code expired." };
+      if (expiry < new Date()) return { success: false, error: "Code expired. Please request a new one." };
 
       await supabase.from('profiles').update({ 
         is_verified: true, 
@@ -131,7 +140,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           verification_code: code, 
           code_expiry: new Date(Date.now() + 15 * 60000).toISOString() 
         }).eq('email', email);
-        alert(`VERIFICATION: New code sent to ${email}: ${code}`);
+        
+        showInternalCode("UNVERIFIED LOGIN", email, code);
         return { success: false, requiresVerification: true };
       }
 
@@ -154,7 +164,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }).eq('email', email).select();
 
       if (error || !data || data.length === 0) return { success: false, error: "Email not found." };
-      alert(`RESET: Your password reset code is ${code}`);
+      
+      showInternalCode("PASSWORD RECOVERY", email, code);
       return { success: true };
     } catch (e: any) {
       return { success: false, error: "Request failed." };
@@ -163,9 +174,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const resetPasswordWithCode = async (email: string, code: string, newPassword: string) => {
     try {
-      const { data, error } = await supabase.from('profiles').select('*').eq('email', email).eq('verification_code', code).maybeSingle();
-      if (error || !data) return { success: false, error: "Invalid code." };
-      await supabase.from('profiles').update({ password_plain: newPassword, verification_code: null, code_expiry: null }).eq('email', email);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('email', email)
+        .eq('verification_code', code)
+        .maybeSingle();
+
+      if (error || !data) return { success: false, error: "Invalid or expired reset code." };
+      
+      const expiry = new Date(data.code_expiry);
+      if (expiry < new Date()) return { success: false, error: "Reset code has expired." };
+
+      await supabase.from('profiles').update({ 
+        password_plain: newPassword, 
+        verification_code: null, 
+        code_expiry: null 
+      }).eq('email', email);
+
       return { success: true };
     } catch (e: any) {
       return { success: false, error: "Reset failed." };

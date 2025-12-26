@@ -72,7 +72,10 @@ export const Login: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2">Password</label>
+                <div className="flex justify-between items-center mb-2">
+                   <label className="block text-xs font-black text-gray-500 uppercase tracking-widest">Password</label>
+                   <Link to="/reset-password" onClick={(e) => { if(email) localStorage.setItem('newsflow_reset_email_prefill', email); }} className="text-[10px] font-bold text-[#b4a070] hover:underline uppercase tracking-tighter">Forgot Password?</Link>
+                </div>
                 <div className="relative">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
                   <input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="w-full pl-12 pr-4 py-4 border-2 border-gray-50 rounded-2xl outline-none focus:border-[#b4a070]" placeholder="••••••••" />
